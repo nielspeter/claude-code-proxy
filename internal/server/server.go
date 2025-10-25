@@ -29,9 +29,13 @@ func Start(cfg *config.Config) error {
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "*",
 	}))
-	app.Use(logger.New(logger.Config{
-		Format: "[${time}] ${status} - ${latency} ${method} ${path}\n",
-	}))
+
+	// Enable HTTP logging only when simple log mode is enabled
+	if cfg.SimpleLog {
+		app.Use(logger.New(logger.Config{
+			Format: "[${time}] ${status} - ${latency} ${method} ${path}\n",
+		}))
+	}
 
 	// Health check endpoint
 	app.Get("/health", func(c *fiber.Ctx) error {
