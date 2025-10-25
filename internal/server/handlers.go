@@ -150,7 +150,9 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 		if duration > 0 && claudeResp.Usage.OutputTokens > 0 {
 			tokensPerSec = float64(claudeResp.Usage.OutputTokens) / duration
 		}
-		fmt.Printf("[REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+		timestamp := time.Now().Format("15:04:05")
+		fmt.Printf("[%s] [REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+			timestamp,
 			cfg.OpenAIBaseURL,
 			openaiReq.Model,
 			claudeResp.Usage.InputTokens,
@@ -766,7 +768,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			tokensPerSec = float64(outputTokens) / duration
 		}
 
-		fmt.Printf("[REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+		timestamp := time.Now().Format("15:04:05")
+		fmt.Printf("[%s] [REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+			timestamp,
 			cfg.OpenAIBaseURL,
 			providerModel,
 			inputTokens,
