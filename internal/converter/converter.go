@@ -9,6 +9,13 @@ import (
 	"github.com/claude-code-proxy/proxy/pkg/models"
 )
 
+// Default model mappings when env overrides are not set
+const (
+	DefaultOpusModel   = "gpt-5"
+	DefaultSonnetModel = "gpt-5"
+	DefaultHaikuModel  = "gpt-5-mini"
+)
+
 // extractSystemText extracts system text from either string or array format
 func extractSystemText(system interface{}) string {
 	if system == nil {
@@ -151,30 +158,15 @@ func mapModel(claudeModel string, cfg *config.Config) string {
 		if cfg.HaikuModel != "" {
 			return cfg.HaikuModel
 		}
-		return "gpt-5-mini"
+		return DefaultHaikuModel
 	}
 
-	// Sonnet tier - version-aware routing
+	// Sonnet tier
 	if strings.Contains(modelLower, "sonnet") {
-		// Check for explicit env override
 		if cfg.SonnetModel != "" {
 			return cfg.SonnetModel
 		}
-
-		// Pattern-based routing by version
-		// Check for Sonnet 3.x first (e.g., claude-3-5-sonnet, claude-3-sonnet)
-		if strings.Contains(modelLower, "claude-3") || strings.Contains(modelLower, "sonnet-3") {
-			return "gpt-4o" // Sonnet 3.x → GPT-4o
-		}
-
-		// Check for Sonnet 4/5 (newer)
-		if strings.Contains(modelLower, "claude-4") || strings.Contains(modelLower, "claude-5") ||
-			strings.Contains(modelLower, "sonnet-4") || strings.Contains(modelLower, "sonnet-5") {
-			return "gpt-5" // Newer Sonnet → GPT-5
-		}
-
-		// Default fallback for unversioned "sonnet"
-		return "gpt-5"
+		return DefaultSonnetModel
 	}
 
 	// Opus tier
@@ -182,7 +174,7 @@ func mapModel(claudeModel string, cfg *config.Config) string {
 		if cfg.OpusModel != "" {
 			return cfg.OpusModel
 		}
-		return "gpt-5"
+		return DefaultOpusModel
 	}
 
 	// Pass through non-Claude models (OpenAI, OpenRouter, etc.)

@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/claude-code-proxy/proxy/internal/config"
+	"github.com/claude-code-proxy/proxy/internal/converter"
 	"github.com/claude-code-proxy/proxy/internal/daemon"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -118,7 +119,7 @@ func getOpusModel(cfg *config.Config) string {
 	if cfg.OpusModel != "" {
 		return cfg.OpusModel
 	}
-	return "gpt-5 (pattern-based)"
+	return converter.DefaultOpusModel + " (pattern-based)"
 }
 
 func getSonnetModel(cfg *config.Config) string {
@@ -132,7 +133,7 @@ func getHaikuModel(cfg *config.Config) string {
 	if cfg.HaikuModel != "" {
 		return cfg.HaikuModel
 	}
-	return "gpt-5-mini (pattern-based)"
+	return converter.DefaultHaikuModel + " (pattern-based)"
 }
 
 func setupClaudeEndpoints(app *fiber.App, cfg *config.Config) {

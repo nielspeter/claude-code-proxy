@@ -109,7 +109,7 @@ func TestMapModel(t *testing.T) {
 		{
 			name:        "sonnet-3 model",
 			claudeModel: "claude-3-5-sonnet-20241022",
-			expected:    "gpt-4o",
+			expected:    "gpt-5", // All sonnets now map to gpt-5
 		},
 		{
 			name:        "opus model",
