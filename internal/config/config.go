@@ -37,9 +37,6 @@ type Config struct {
 	Host string
 	Port string
 
-	// Performance
-	RequestTimeout int
-
 	// Debug logging
 	Debug bool
 
@@ -88,9 +85,6 @@ func Load() (*Config, error) {
 		// Server settings
 		Host: getEnvOrDefault("HOST", "0.0.0.0"),
 		Port: getEnvOrDefault("PORT", "8082"),
-
-		// Performance
-		RequestTimeout: getEnvAsIntOrDefault("REQUEST_TIMEOUT", 90),
 
 		// Passthrough mode
 		PassthroughMode: getEnvAsBoolOrDefault("PASSTHROUGH_MODE", false),
