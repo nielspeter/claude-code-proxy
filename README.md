@@ -98,15 +98,37 @@ EOF
 
 ### Run
 
-**Option 1: Start daemon manually**
+**Commands:**
 
 ```bash
-./claude-code-proxy           # Start daemon
-./claude-code-proxy status    # Check status
-./claude-code-proxy stop      # Stop daemon
+./claude-code-proxy              # Start daemon
+./claude-code-proxy status       # Check if running
+./claude-code-proxy stop         # Stop daemon
+./claude-code-proxy version      # Show version
+./claude-code-proxy help         # Show help
 ```
 
-**Option 2: Use ccp wrapper (recommended)**
+**Flags:**
+
+```bash
+-d, --debug     # Enable debug mode (full request/response logging)
+-s, --simple    # Enable simple log mode (one-line summaries)
+```
+
+**Examples:**
+
+```bash
+# Start with debug logging
+./claude-code-proxy -d
+
+# Start with simple one-line summaries
+./claude-code-proxy -s
+
+# Combine flags
+./claude-code-proxy -d -s
+```
+
+**Option 1: Use ccp wrapper (recommended)**
 
 ```bash
 # Copy wrapper script
@@ -123,11 +145,11 @@ The `ccp` wrapper automatically:
 - Sets `ANTHROPIC_BASE_URL`
 - Execs `claude` with your arguments
 
-**Option 3: Use with Claude Code directly**
+**Option 2: Use with Claude Code directly**
 
 ```bash
 # Start the proxy
-./claude-code-proxy -d
+./claude-code-proxy
 
 # Configure Claude Code to use the proxy
 export ANTHROPIC_BASE_URL=http://localhost:8082
@@ -177,7 +199,7 @@ make build-all
 
 **Optional - Model Routing:**
 - `ANTHROPIC_DEFAULT_OPUS_MODEL` - Override opus routing (default: `gpt-5`)
-- `ANTHROPIC_DEFAULT_SONNET_MODEL` - Override sonnet routing (default: version-aware)
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` - Override sonnet routing (default: `gpt-5`)
 - `ANTHROPIC_DEFAULT_HAIKU_MODEL` - Override haiku routing (default: `gpt-5-mini`)
 
 Examples with OpenRouter:
