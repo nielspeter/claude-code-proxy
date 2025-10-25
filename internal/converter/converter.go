@@ -54,12 +54,9 @@ func extractReasoningText(detail map[string]interface{}) string {
 			return summary
 		}
 	case "reasoning.encrypted":
-		// For encrypted reasoning, return a placeholder or skip
-		// Some models like OpenAI o-series return [REDACTED]
-		if data, ok := detail["data"].(string); ok {
-			return data
-		}
-		return "[Reasoning redacted by model provider]"
+		// Skip encrypted reasoning - it's base64 encrypted data not meant to be shown
+		// Models like Grok send this alongside reasoning.summary
+		return ""
 	}
 
 	return ""
