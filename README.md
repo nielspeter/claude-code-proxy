@@ -1,6 +1,6 @@
 # Claude Code Proxy (Go)
 
-A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers like OpenRouter, allowing access to GPT models, Grok, Gemini, and more through the Claude API interface.
+A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (o1/o3 reasoning), and Ollama (free local inference).
 
 ## Features
 
@@ -9,9 +9,11 @@ A lightweight, production-ready HTTP proxy that enables Claude Code to work with
   - Extended thinking blocks with proper hiding/showing
   - Streaming responses with real-time token tracking
   - Proper SSE event formatting
+- ✅ **Multiple Provider Support** - OpenRouter, OpenAI Direct, and Ollama
+  - **OpenRouter**: 200+ models (GPT, Grok, Gemini, etc.) through single API
+  - **OpenAI Direct**: Native o1/o3 reasoning model support
+  - **Ollama**: Free local inference with DeepSeek-R1, Llama3, Qwen, etc.
 - ✅ **Pattern-based routing** - Auto-detects Claude models and routes to appropriate backend models
-- ✅ **OpenRouter Integration** - Access 200+ models through a single API
-- ✅ **Multiple Provider Support** - Route to GPT (OpenAI), Grok (X.AI), Gemini (Google), and more
 - ✅ **Zero dependencies** - Single ~10MB binary, no runtime needed
 - ✅ **Daemon mode** - Runs in background, serves multiple Claude Code sessions
 - ✅ **Fast startup** - < 10ms cold start
@@ -35,28 +37,64 @@ make build
 
 ### Configuration
 
-Create config file at `~/.claude/proxy.env`:
+The proxy supports three provider types. Choose the one that fits your needs:
 
+**Option 1: OpenRouter (Recommended)**
 ```bash
 mkdir -p ~/.claude
 cat > ~/.claude/proxy.env << 'EOF'
-# For OpenRouter (recommended - access 200+ models)
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-your-openrouter-key
 
-# Model routing (examples using OpenRouter model names)
+# Model routing
 ANTHROPIC_DEFAULT_SONNET_MODEL=x-ai/grok-code-fast-1
 ANTHROPIC_DEFAULT_HAIKU_MODEL=google/gemini-2.5-flash
-ANTHROPIC_DEFAULT_OPUS_MODEL=openai/gpt-5
 
-# Optional: For direct OpenAI access instead
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENAI_API_KEY=sk-your-openai-key
-
-# Optional: Client validation (uncomment to enable)
-# ANTHROPIC_API_KEY=your-validation-key
+# Optional: Better rate limits
+OPENROUTER_APP_NAME=Claude-Code-Proxy
+OPENROUTER_APP_URL=https://github.com/yourname/repo
 EOF
 ```
+
+**Option 2: OpenAI Direct**
+```bash
+mkdir -p ~/.claude
+cat > ~/.claude/proxy.env << 'EOF'
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-your-openai-key
+
+# Model routing
+ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-4o
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-4o-mini
+ANTHROPIC_DEFAULT_OPUS_MODEL=o1-preview  # Reasoning model
+EOF
+```
+
+**Option 3: Ollama (Local)**
+```bash
+mkdir -p ~/.claude
+cat > ~/.claude/proxy.env << 'EOF'
+OPENAI_BASE_URL=http://localhost:11434/v1
+# No API key needed!
+
+# Model routing
+ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-r1:70b
+ANTHROPIC_DEFAULT_HAIKU_MODEL=llama3.1:8b
+EOF
+```
+
+## Provider Comparison
+
+| Feature | OpenRouter | OpenAI Direct | Ollama |
+|---------|-----------|---------------|--------|
+| **Cost** | Pay-per-use | Pay-per-use | Free |
+| **Setup** | Easy | Easy | Requires local install |
+| **Models** | 200+ | OpenAI only | Open source only |
+| **Reasoning** | Yes (via GPT/Grok/etc) | Yes (o1/o3) | Yes (DeepSeek-R1) |
+| **Tool Calling** | Yes | Yes | Model dependent |
+| **Privacy** | Cloud | Cloud | 100% local |
+| **Speed** | Fast | Fast | Very fast (local) |
+| **API Key** | Required | Required | Not needed |
 
 ### Run
 
@@ -130,11 +168,12 @@ make build-all
 ## Configuration Reference
 
 **Required:**
-- `OPENAI_API_KEY` - Your OpenAI or OpenRouter API key
+- `OPENAI_API_KEY` - Your API key (not needed for Ollama/localhost)
 
 **Optional - API Configuration:**
 - `OPENAI_BASE_URL` - API base URL (default: `https://api.openai.com/v1`)
   - For OpenRouter: `https://openrouter.ai/api/v1`
+  - For Ollama: `http://localhost:11434/v1`
   - For other providers: Use their OpenAI-compatible endpoint
 
 **Optional - Model Routing:**
@@ -148,6 +187,10 @@ ANTHROPIC_DEFAULT_SONNET_MODEL=x-ai/grok-code-fast-1
 ANTHROPIC_DEFAULT_HAIKU_MODEL=google/gemini-2.5-flash
 ANTHROPIC_DEFAULT_OPUS_MODEL=openai/gpt-5
 ```
+
+**Optional - OpenRouter Specific:**
+- `OPENROUTER_APP_NAME` - App name for OpenRouter dashboard tracking
+- `OPENROUTER_APP_URL` - App URL for better rate limits (higher quotas)
 
 **Optional - Security:**
 - `ANTHROPIC_API_KEY` - Client API key validation (optional)

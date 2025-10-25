@@ -182,7 +182,21 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, requ
 
 		// Set headers
 		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+
+		// Skip auth for Ollama (localhost) - Ollama doesn't require authentication
+		if !cfg.IsLocalhost() {
+			httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+		}
+
+		// OpenRouter-specific headers for better rate limits
+		if cfg.DetectProvider() == config.ProviderOpenRouter {
+			if cfg.OpenRouterAppURL != "" {
+				httpReq.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
+			}
+			if cfg.OpenRouterAppName != "" {
+				httpReq.Header.Set("X-Title", cfg.OpenRouterAppName)
+			}
+		}
 
 		client := &http.Client{
 			Timeout: 300 * time.Second, // Longer timeout for streaming
@@ -364,8 +378,38 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 			continue
 		}
 
-		// Handle reasoning_details delta (thinking blocks)
-		// OpenRouter sends reasoning_details in delta.reasoning_details array
+		// Handle reasoning delta (thinking blocks)
+		// Support both OpenRouter and OpenAI formats:
+		// - OpenRouter: delta.reasoning_details (array)
+		// - OpenAI o1/o3: delta.reasoning_content (string)
+
+		// First, check for OpenAI's reasoning_content format (o1/o3 models)
+		if reasoningContent, ok := delta["reasoning_content"].(string); ok && reasoningContent != "" {
+			// Send content_block_start for thinking block on first thinking delta
+			if !thinkingBlockStarted {
+				writeSSEEvent(w, "content_block_start", map[string]interface{}{
+					"type":  "content_block_start",
+					"index": thinkingBlockIndex,
+					"content_block": map[string]interface{}{
+						"type": "thinking",
+					},
+				})
+				thinkingBlockStarted = true
+				thinkingBlockHasContent = true
+			}
+
+			// Send thinking delta
+			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": thinkingBlockIndex,
+				"delta": map[string]interface{}{
+					"type": "thinking_delta",
+					"text": reasoningContent,
+				},
+			})
+		}
+
+		// Then, check for OpenRouter's reasoning_details format
 		// Only process reasoning_details if we haven't already processed reasoning field
 		if reasoningDetailsRaw, ok := delta["reasoning_details"]; ok && delta["reasoning"] == nil {
 			if reasoningDetails, ok := reasoningDetailsRaw.([]interface{}); ok && len(reasoningDetails) > 0 {
@@ -711,7 +755,21 @@ func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIRe
 
 	// Set headers
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+
+	// Skip auth for Ollama (localhost) - Ollama doesn't require authentication
+	if !cfg.IsLocalhost() {
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+	}
+
+	// OpenRouter-specific headers for better rate limits
+	if cfg.DetectProvider() == config.ProviderOpenRouter {
+		if cfg.OpenRouterAppURL != "" {
+			httpReq.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
+		}
+		if cfg.OpenRouterAppName != "" {
+			httpReq.Header.Set("X-Title", cfg.OpenRouterAppName)
+		}
+	}
 
 	// Create HTTP client with timeout
 	client := &http.Client{
