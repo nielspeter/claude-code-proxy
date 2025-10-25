@@ -41,6 +41,32 @@ go build -o claude-code-proxy cmd/claude-code-proxy/main.go
 make build
 ```
 
+### Install
+
+**Option 1: System-wide installation (recommended)**
+
+```bash
+# Install binary and ccp wrapper to /usr/local/bin
+make install
+
+# This installs:
+#   - claude-code-proxy (main binary)
+#   - ccp (wrapper script for easy usage)
+```
+
+**Option 2: Manual installation**
+
+```bash
+# Copy binary to PATH
+sudo cp claude-code-proxy /usr/local/bin/
+
+# Copy wrapper script (optional but recommended)
+sudo cp scripts/ccp /usr/local/bin/
+sudo chmod +x /usr/local/bin/ccp
+```
+
+After installation, `claude-code-proxy` and `ccp` will be available system-wide.
+
 ### Configuration
 
 The proxy supports three provider types. Choose the one that fits your needs:
@@ -136,20 +162,21 @@ EOF
 
 **Option 1: Use ccp wrapper (recommended)**
 
-```bash
-# Copy wrapper script
-cp scripts/ccp ~/.local/bin/ccp
-chmod +x ~/.local/bin/ccp
+If you installed via `make install`, the `ccp` wrapper is already available:
 
+```bash
 # Use ccp instead of claude
 ccp chat
 ccp --version
+ccp code /path/to/project
 ```
 
 The `ccp` wrapper automatically:
 - Starts the proxy daemon (if not running)
 - Sets `ANTHROPIC_BASE_URL`
 - Execs `claude` with your arguments
+
+**No installation needed** - `ccp` is installed system-wide with `make install`.
 
 **Option 2: Use with Claude Code directly**
 

@@ -101,9 +101,13 @@ build-all: clean
 install: build
 	@echo "📦 Installing $(BINARY) to /usr/local/bin..."
 	sudo cp $(BINARY) /usr/local/bin/$(BINARY)
-	@echo "✅ Installed: /usr/local/bin/$(BINARY)"
+	sudo cp scripts/ccp /usr/local/bin/ccp
+	sudo chmod +x /usr/local/bin/ccp
+	@echo "✅ Installed:"
+	@echo "   - /usr/local/bin/$(BINARY)"
+	@echo "   - /usr/local/bin/ccp (wrapper script)"
 	@echo ""
 	@echo "📋 Next steps:"
 	@echo "  1. Create config: mkdir -p ~/.claude && cp .env.example ~/.claude/proxy.env"
 	@echo "  2. Edit config: nano ~/.claude/proxy.env"
-	@echo "  3. Run: $(BINARY)"
+	@echo "  3. Run: ccp chat (or claude-code-proxy)"

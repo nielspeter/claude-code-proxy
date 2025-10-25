@@ -12,14 +12,14 @@ PROXY_URL="http://localhost:${PROXY_PORT}"
 # Check if proxy binary exists
 # ============================================================================
 
-if ! command -v ./claude-code-proxy &> /dev/null; then
+if ! command -v claude-code-proxy &> /dev/null; then
     echo "❌ Error: claude-code-proxy not found in PATH"
     echo ""
     echo "Please install it:"
-    echo "  cd proxy && make install"
+    echo "  make install"
     echo ""
-    echo "Or add to PATH:"
-    echo "  export PATH=\$PATH:/path/to/proxy"
+    echo "Or add the binary to your PATH:"
+    echo "  export PATH=\$PATH:/path/to/binary"
     exit 1
 fi
 
@@ -32,7 +32,7 @@ if ! curl -sf "${PROXY_URL}/health" >/dev/null 2>&1; then
     echo "🚀 Starting Claude Code Proxy..."
 
     # Start daemon (detached, runs independently)
-    ./claude-code-proxy >/dev/null 2>&1 &
+    claude-code-proxy >/dev/null 2>&1 &
 
     # Wait for proxy to be ready (max 5 seconds)
     for i in {1..10}; do
