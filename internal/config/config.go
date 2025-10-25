@@ -125,16 +125,6 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-func getEnvAsIntOrDefault(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		var intValue int
-		if _, err := fmt.Sscanf(value, "%d", &intValue); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
 func getEnvAsBoolOrDefault(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		return value == "true" || value == "1" || value == "yes"

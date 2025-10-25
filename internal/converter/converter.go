@@ -105,8 +105,8 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 			openaiReq.StreamOptions = map[string]interface{}{
 				"include_usage": true,
 			}
-		// GPT-5 models: Use Chat Completions reasoning_effort parameter
-		openaiReq.ReasoningEffort = "medium" // minimal | low | medium | high
+			// GPT-5 models: Use Chat Completions reasoning_effort parameter
+			openaiReq.ReasoningEffort = "medium" // minimal | low | medium | high
 
 		case config.ProviderOllama:
 			// Force Ollama to use tools when they're provided

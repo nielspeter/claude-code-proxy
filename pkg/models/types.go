@@ -66,9 +66,9 @@ type OpenAIRequest struct {
 	TopP                *float64               `json:"top_p,omitempty"`
 	Stop                []string               `json:"stop,omitempty"`
 	Stream              *bool                  `json:"stream,omitempty"`
-	StreamOptions       map[string]interface{} `json:"stream_options,omitempty"` // OpenAI standard
-	Usage               map[string]interface{} `json:"usage,omitempty"`          // OpenRouter
-	Reasoning           map[string]interface{} `json:"reasoning,omitempty"`      // OpenRouter reasoning tokens
+	StreamOptions       map[string]interface{} `json:"stream_options,omitempty"`   // OpenAI standard
+	Usage               map[string]interface{} `json:"usage,omitempty"`            // OpenRouter
+	Reasoning           map[string]interface{} `json:"reasoning,omitempty"`        // OpenRouter reasoning tokens
 	ReasoningEffort     string                 `json:"reasoning_effort,omitempty"` // OpenAI Chat Completions reasoning (GPT-5 models)
 	Tools               []OpenAITool           `json:"tools,omitempty"`
 	ToolChoice          interface{}            `json:"tool_choice,omitempty"` // Force tool usage: "auto", "required", or specific tool

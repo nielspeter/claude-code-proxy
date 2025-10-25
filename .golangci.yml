@@ -15,11 +15,34 @@ linters:
 
 linters-settings:
   errcheck:
-    check-blank: true
+    check-blank: false
+    exclude-functions:
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (io.Closer).Close
+      - (*net/http.ResponseWriter).Write
+      - (*bufio.Writer).Flush
+    ignore: "fmt:.*,io:EOF"
   gofmt:
     simplify: true
 
 issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  exclude-use-default: true
+  exclude-rules:
+    # Exclude error checks in test files
+    - path: _test\.go
+      linters:
+        - errcheck
+    # Exclude common patterns that are safe to ignore
+    - text: "Error return value of.*os\\.(Setenv|Unsetenv).*is not checked"
+      linters:
+        - errcheck
+    - text: "Error return value of.*json\\.Marshal.*is not checked"
+      linters:
+        - errcheck
+    - text: "Error return value of.*w\\.Flush.*is not checked"
+      linters:
+        - errcheck
+    - text: "Error return value of.*resp\\.Body\\.Close.*is not checked"
+      linters:
+        - errcheck

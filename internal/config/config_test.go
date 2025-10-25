@@ -8,38 +8,38 @@ import (
 // TestProviderDetection tests that we correctly identify providers from OPENAI_BASE_URL
 func TestProviderDetection(t *testing.T) {
 	tests := []struct {
-		name            string
-		baseURL         string
+		name             string
+		baseURL          string
 		expectedProvider ProviderType
 	}{
 		{
-			name:            "OpenRouter detection",
-			baseURL:         "https://openrouter.ai/api/v1",
+			name:             "OpenRouter detection",
+			baseURL:          "https://openrouter.ai/api/v1",
 			expectedProvider: ProviderOpenRouter,
 		},
 		{
-			name:            "OpenAI Direct detection",
-			baseURL:         "https://api.openai.com/v1",
+			name:             "OpenAI Direct detection",
+			baseURL:          "https://api.openai.com/v1",
 			expectedProvider: ProviderOpenAI,
 		},
 		{
-			name:            "Ollama local detection",
-			baseURL:         "http://localhost:11434/v1",
+			name:             "Ollama local detection",
+			baseURL:          "http://localhost:11434/v1",
 			expectedProvider: ProviderOllama,
 		},
 		{
-			name:            "Ollama with different port",
-			baseURL:         "http://localhost:8080/v1",
+			name:             "Ollama with different port",
+			baseURL:          "http://localhost:8080/v1",
 			expectedProvider: ProviderOllama,
 		},
 		{
-			name:            "Ollama with custom host - should be unknown since not localhost",
-			baseURL:         "http://192.168.1.100:11434/v1",
+			name:             "Ollama with custom host - should be unknown since not localhost",
+			baseURL:          "http://192.168.1.100:11434/v1",
 			expectedProvider: ProviderUnknown,
 		},
 		{
-			name:            "Unknown provider",
-			baseURL:         "https://custom-api.example.com/v1",
+			name:             "Unknown provider",
+			baseURL:          "https://custom-api.example.com/v1",
 			expectedProvider: ProviderUnknown,
 		},
 	}

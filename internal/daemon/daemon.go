@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
@@ -89,11 +88,11 @@ func Status() {
 
 func writePID() error {
 	pid := os.Getpid()
-	return ioutil.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644)
+	return os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644)
 }
 
 func readPID() (int, error) {
-	data, err := ioutil.ReadFile(pidFile)
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, err
 	}

@@ -803,20 +803,6 @@ func writeSSEError(w *bufio.Writer, message string) {
 	w.Flush()
 }
 
-// convertFinishReasonStreaming converts OpenAI finish reason to Claude format (streaming)
-func convertFinishReasonStreaming(openaiReason string) string {
-	switch openaiReason {
-	case "stop":
-		return "end_turn"
-	case "length":
-		return "max_tokens"
-	case "tool_calls":
-		return "tool_use"
-	default:
-		return "end_turn"
-	}
-}
-
 // callOpenAI makes an HTTP request to the OpenAI API
 func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIResponse, error) {
 	// Marshal request to JSON
