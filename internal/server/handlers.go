@@ -576,6 +576,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 		}
 
 		// Handle finish reason (matches Python lines 200-210)
+		// NOTE: Don't break here - with stream_options.include_usage, OpenAI sends usage in a chunk AFTER finish_reason
 		if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
 			if finishReason == "length" {
 				finalStopReason = "max_tokens"
@@ -586,7 +587,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 			} else {
 				finalStopReason = "end_turn"
 			}
-			break
+			// Continue processing to capture usage chunk (don't break)
 		}
 	}
 
@@ -622,10 +623,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 		w.Flush()
 	}
 
-	// NOTE: OpenRouter streaming doesn't include usage data in chunks
-	// Usage data IS available in non-streaming responses
-	if cfg.Debug && usageData["input_tokens"].(int) == 0 && usageData["output_tokens"].(int) == 0 {
-		fmt.Printf("[DEBUG] OpenRouter streaming: Usage data unavailable (expected limitation of streaming API)\n")
+	// Debug: Check if usage data was received
+	if cfg.Debug {
+		inputTokens, _ := usageData["input_tokens"].(int)
+		outputTokens, _ := usageData["output_tokens"].(int)
+		if inputTokens == 0 && outputTokens == 0 {
+			fmt.Printf("[DEBUG] OpenRouter streaming: Usage data unavailable (expected limitation of streaming API)\n")
+		}
 	}
 
 	// Send message_delta with stop_reason and accumulated usage data
