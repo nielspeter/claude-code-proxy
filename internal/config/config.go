@@ -38,7 +38,6 @@ type Config struct {
 	Port string
 
 	// Performance
-	MaxTokensLimit int
 	RequestTimeout int
 
 	// Debug logging
@@ -91,7 +90,6 @@ func Load() (*Config, error) {
 		Port: getEnvOrDefault("PORT", "8082"),
 
 		// Performance
-		MaxTokensLimit: getEnvAsIntOrDefault("MAX_TOKENS_LIMIT", 400000),
 		RequestTimeout: getEnvAsIntOrDefault("REQUEST_TIMEOUT", 90),
 
 		// Passthrough mode
