@@ -14,7 +14,7 @@ type Config struct {
 	OpenAIAPIKey string
 
 	// Optional
-	OpenAIBaseURL string
+	OpenAIBaseURL   string
 	AnthropicAPIKey string
 
 	// Model routing (pattern-based if not set)

@@ -86,10 +86,8 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 
 	// Handle streaming vs non-streaming
 	if openaiReq.Stream != nil && *openaiReq.Stream {
-		fmt.Printf("[DEBUG] Entering streaming handler\n")
 		return handleStreamingMessages(c, openaiReq, claudeReq.Model, cfg)
 	}
-	fmt.Printf("[DEBUG] Using non-streaming handler\n")
 
 	// Non-streaming response
 	openaiResp, err := callOpenAI(openaiReq, cfg)
@@ -250,11 +248,11 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 
 	// State variables (matches Python implementation)
 	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
-	textBlockIndex := 1                           // Text block is index 1 (thinking is 0)
-	toolBlockCounter := 2                         // Tool calls start at index 2
+	textBlockIndex := 1                              // Text block is index 1 (thinking is 0)
+	toolBlockCounter := 2                            // Tool calls start at index 2
 	currentToolCalls := make(map[int]*ToolCallState) // Python: current_tool_calls = {}
-	finalStopReason := "end_turn"                // Python: final_stop_reason = "end_turn"
-	usageData := map[string]interface{}{         // Python: usage_data = {...}
+	finalStopReason := "end_turn"                    // Python: final_stop_reason = "end_turn"
+	usageData := map[string]interface{}{             // Python: usage_data = {...}
 		"input_tokens":                0,
 		"output_tokens":               0,
 		"cache_creation_input_tokens": 0,

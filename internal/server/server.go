@@ -36,7 +36,7 @@ func Start(cfg *config.Config) error {
 	// Health check endpoint
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"status": "ok",
+			"status":  "ok",
 			"version": "1.0.0",
 		})
 	})

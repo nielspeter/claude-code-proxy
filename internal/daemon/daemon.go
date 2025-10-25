@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	pidFile = "/tmp/claude-code-proxy.pid"
+	pidFile   = "/tmp/claude-code-proxy.pid"
 	healthURL = "http://localhost:8082/health"
 )
 
