@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Claude Code Proxy wrapper (ccp)
+# Automatically starts the proxy daemon and runs Claude Code
+
+set -e
+
+PROXY_PORT="${PORT:-8082}"
+PROXY_URL="http://localhost:${PROXY_PORT}"
+
+# ============================================================================
+# Check if proxy binary exists
+# ============================================================================
+
+if ! command -v ./claude-code-proxy &> /dev/null; then
+    echo "❌ Error: claude-code-proxy not found in PATH"
+    echo ""
+    echo "Please install it:"
+    echo "  cd proxy && make install"
+    echo ""
+    echo "Or add to PATH:"
+    echo "  export PATH=\$PATH:/path/to/proxy"
+    exit 1
+fi
+
+# ============================================================================
+# Start proxy if not running
+# ============================================================================
+
+# Check if proxy is running
+if ! curl -sf "${PROXY_URL}/health" >/dev/null 2>&1; then
+    echo "🚀 Starting Claude Code Proxy..."
+
+    # Start daemon (detached, runs independently)
+    ./claude-code-proxy >/dev/null 2>&1 &
+
+    # Wait for proxy to be ready (max 5 seconds)
+    for i in {1..10}; do
+        if curl -sf "${PROXY_URL}/health" >/dev/null 2>&1; then
+            echo "✅ Proxy ready"
+            break
+        fi
+        if [ $i -eq 10 ]; then
+            echo "❌ Failed to start proxy"
+            echo "Try running manually: claude-code-proxy"
+            exit 1
+        fi
+        sleep 0.5
+    done
+fi
+
+# ============================================================================
+# Run Claude Code with proxy
+# ============================================================================
+
+# Set proxy URL for Claude Code
+export ANTHROPIC_BASE_URL="${PROXY_URL}"
+
+# Execute claude with all arguments
+# Using exec so claude replaces this shell process
+exec claude "$@"
