@@ -552,6 +552,214 @@ func TestConvertMessagesWithComplexContent(t *testing.T) {
 			t.Errorf("Content = %q, want %q", contentStr, "Weather is sunny")
 		}
 	})
+
+	t.Run("message with tool_use blocks", func(t *testing.T) {
+		messages := []models.ClaudeMessage{
+			{
+				Role: "assistant",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "tool_use",
+						"id":   "call_456",
+						"name": "get_weather",
+						"input": map[string]interface{}{
+							"location": "San Francisco",
+						},
+					},
+				},
+			},
+		}
+
+		result := convertMessages(messages, "")
+
+		if len(result) != 1 {
+			t.Fatalf("Expected 1 message, got %d", len(result))
+		}
+
+		if result[0].Role != "assistant" {
+			t.Errorf("Role = %q, want %q", result[0].Role, "assistant")
+		}
+
+		if len(result[0].ToolCalls) != 1 {
+			t.Fatalf("Expected 1 tool call, got %d", len(result[0].ToolCalls))
+		}
+
+		toolCall := result[0].ToolCalls[0]
+		if toolCall.ID != "call_456" {
+			t.Errorf("ToolCall ID = %q, want %q", toolCall.ID, "call_456")
+		}
+
+		if toolCall.Type != "function" {
+			t.Errorf("ToolCall Type = %q, want %q", toolCall.Type, "function")
+		}
+
+		if toolCall.Function.Name != "get_weather" {
+			t.Errorf("Function Name = %q, want %q", toolCall.Function.Name, "get_weather")
+		}
+
+		if toolCall.Function.Arguments != `{"location":"San Francisco"}` {
+			t.Errorf("Function Arguments = %q, want %q", toolCall.Function.Arguments, `{"location":"San Francisco"}`)
+		}
+	})
+
+	t.Run("message with mixed text and tool_use blocks", func(t *testing.T) {
+		messages := []models.ClaudeMessage{
+			{
+				Role: "assistant",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"text": "Let me check the weather for you.",
+					},
+					map[string]interface{}{
+						"type": "tool_use",
+						"id":   "call_789",
+						"name": "get_weather",
+						"input": map[string]interface{}{
+							"location": "New York",
+						},
+					},
+				},
+			},
+		}
+
+		result := convertMessages(messages, "")
+
+		if len(result) != 1 {
+			t.Fatalf("Expected 1 message, got %d", len(result))
+		}
+
+		contentStr, ok := result[0].Content.(string)
+		if !ok {
+			t.Fatal("Content is not a string")
+		}
+
+		if contentStr != "Let me check the weather for you." {
+			t.Errorf("Content = %q, want %q", contentStr, "Let me check the weather for you.")
+		}
+
+		if len(result[0].ToolCalls) != 1 {
+			t.Fatalf("Expected 1 tool call, got %d", len(result[0].ToolCalls))
+		}
+
+		if result[0].ToolCalls[0].ID != "call_789" {
+			t.Errorf("ToolCall ID = %q, want %q", result[0].ToolCalls[0].ID, "call_789")
+		}
+	})
+
+	t.Run("complete tool call cycle", func(t *testing.T) {
+		// Simulates: assistant calls tool → user provides result
+		messages := []models.ClaudeMessage{
+			{
+				Role: "assistant",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"text": "I'll get the weather for you.",
+					},
+					map[string]interface{}{
+						"type": "tool_use",
+						"id":   "call_abc",
+						"name": "get_weather",
+						"input": map[string]interface{}{
+							"location": "London",
+						},
+					},
+				},
+			},
+			{
+				Role: "user",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type":        "tool_result",
+						"tool_use_id": "call_abc",
+						"content":     "Temperature: 15°C, Cloudy",
+					},
+				},
+			},
+		}
+
+		result := convertMessages(messages, "")
+
+		if len(result) != 2 {
+			t.Fatalf("Expected 2 messages, got %d", len(result))
+		}
+
+		// First message: assistant with tool call
+		if result[0].Role != "assistant" {
+			t.Errorf("First message role = %q, want %q", result[0].Role, "assistant")
+		}
+
+		if len(result[0].ToolCalls) != 1 {
+			t.Fatalf("Expected 1 tool call, got %d", len(result[0].ToolCalls))
+		}
+
+		if result[0].ToolCalls[0].ID != "call_abc" {
+			t.Errorf("ToolCall ID = %q, want %q", result[0].ToolCalls[0].ID, "call_abc")
+		}
+
+		// Second message: tool result
+		if result[1].Role != "tool" {
+			t.Errorf("Second message role = %q, want %q", result[1].Role, "tool")
+		}
+
+		if result[1].ToolCallID != "call_abc" {
+			t.Errorf("ToolCallID = %q, want %q", result[1].ToolCallID, "call_abc")
+		}
+
+		contentStr, ok := result[1].Content.(string)
+		if !ok {
+			t.Fatal("Tool result content is not a string")
+		}
+
+		if contentStr != "Temperature: 15°C, Cloudy" {
+			t.Errorf("Tool result content = %q, want %q", contentStr, "Temperature: 15°C, Cloudy")
+		}
+	})
+
+	t.Run("multiple tool_use blocks in one message", func(t *testing.T) {
+		messages := []models.ClaudeMessage{
+			{
+				Role: "assistant",
+				Content: []interface{}{
+					map[string]interface{}{
+						"type": "tool_use",
+						"id":   "call_1",
+						"name": "get_weather",
+						"input": map[string]interface{}{
+							"location": "Tokyo",
+						},
+					},
+					map[string]interface{}{
+						"type": "tool_use",
+						"id":   "call_2",
+						"name": "get_time",
+						"input": map[string]interface{}{
+							"timezone": "Asia/Tokyo",
+						},
+					},
+				},
+			},
+		}
+
+		result := convertMessages(messages, "")
+
+		if len(result) != 1 {
+			t.Fatalf("Expected 1 message, got %d", len(result))
+		}
+
+		if len(result[0].ToolCalls) != 2 {
+			t.Fatalf("Expected 2 tool calls, got %d", len(result[0].ToolCalls))
+		}
+
+		if result[0].ToolCalls[0].Function.Name != "get_weather" {
+			t.Errorf("First tool name = %q, want %q", result[0].ToolCalls[0].Function.Name, "get_weather")
+		}
+
+		if result[0].ToolCalls[1].Function.Name != "get_time" {
+			t.Errorf("Second tool name = %q, want %q", result[0].ToolCalls[1].Function.Name, "get_time")
+		}
+	})
 }
 
 // Benchmark tests
