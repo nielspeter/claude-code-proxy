@@ -32,6 +32,9 @@ type Config struct {
 
 	// Debug logging
 	Debug bool
+
+	// Passthrough mode - directly proxy to Anthropic without conversion
+	PassthroughMode bool
 }
 
 // Load reads configuration from environment variables
@@ -72,6 +75,9 @@ func Load() (*Config, error) {
 		// Performance
 		MaxTokensLimit: getEnvAsIntOrDefault("MAX_TOKENS_LIMIT", 400000),
 		RequestTimeout: getEnvAsIntOrDefault("REQUEST_TIMEOUT", 90),
+
+		// Passthrough mode
+		PassthroughMode: getEnvAsBoolOrDefault("PASSTHROUGH_MODE", false),
 	}
 
 	// Validate required fields
@@ -105,6 +111,13 @@ func getEnvAsIntOrDefault(key string, defaultValue int) int {
 		if _, err := fmt.Sscanf(value, "%d", &intValue); err == nil {
 			return intValue
 		}
+	}
+	return defaultValue
+}
+
+func getEnvAsBoolOrDefault(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return value == "true" || value == "1" || value == "yes"
 	}
 	return defaultValue
 }

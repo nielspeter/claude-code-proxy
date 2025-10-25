@@ -78,7 +78,13 @@ func Start(cfg *config.Config) error {
 	// Start server
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	fmt.Printf("✅ Proxy running at http://localhost:%s\n", cfg.Port)
-	fmt.Printf("   Model Routing: %s\n", getRoutingMode(cfg))
+
+	if cfg.PassthroughMode {
+		fmt.Printf("   Mode: PASSTHROUGH (direct to Anthropic API)\n")
+	} else {
+		fmt.Printf("   Mode: Conversion (via %s)\n", cfg.OpenAIBaseURL)
+		fmt.Printf("   Model Routing: %s\n", getRoutingMode(cfg))
+	}
 
 	return app.Listen(addr)
 }

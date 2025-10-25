@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -196,6 +197,7 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 		case []interface{}:
 			// Handle complex content blocks
 			var textParts []string
+			var toolCalls []models.OpenAIToolCall
 			var hasToolResult bool
 
 			// First pass: check if this is a tool result message
@@ -219,6 +221,28 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 						if text, ok := blockMap["text"].(string); ok {
 							textParts = append(textParts, text)
 						}
+
+					case "tool_use":
+						// Convert tool_use to OpenAI's tool_calls format
+						toolUseID, _ := blockMap["id"].(string)
+						toolName, _ := blockMap["name"].(string)
+						toolInput := blockMap["input"]
+
+						// Marshal input to JSON string
+						var inputJSON string
+						if toolInput != nil {
+							if inputBytes, err := json.Marshal(toolInput); err == nil {
+								inputJSON = string(inputBytes)
+							}
+						}
+
+						toolCall := models.OpenAIToolCall{
+							ID:   toolUseID,
+							Type: "function",
+						}
+						toolCall.Function.Name = toolName
+						toolCall.Function.Arguments = inputJSON
+						toolCalls = append(toolCalls, toolCall)
 
 					case "tool_result":
 						// Convert tool_result to OpenAI's tool message format
@@ -252,12 +276,16 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 				}
 			}
 
-			// If there were text parts and this isn't a tool result message, add as regular message
-			if len(textParts) > 0 && !hasToolResult {
-				openaiMessages = append(openaiMessages, models.OpenAIMessage{
-					Role:    msg.Role,
-					Content: strings.Join(textParts, "\n"),
-				})
+			// Add assistant message with text and/or tool calls
+			if len(textParts) > 0 || len(toolCalls) > 0 {
+				if !hasToolResult {
+					textContent := strings.Join(textParts, "\n")
+					openaiMessages = append(openaiMessages, models.OpenAIMessage{
+						Role:      msg.Role,
+						Content:   textContent,
+						ToolCalls: toolCalls,
+					})
+				}
 			}
 
 		default:
