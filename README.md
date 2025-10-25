@@ -1,6 +1,12 @@
 # Claude Code Proxy (Go)
 
-A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (GPT-5 reasoning), and Ollama (free local inference).
+A lightweight HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (GPT-5 reasoning), and Ollama (free local inference).
+
+> **⚠️ Early Stage / Beta Software**
+>
+> This project is in active development and has limited production testing. While core functionality works, edge cases and some provider-specific features may have issues. Use with caution in production environments.
+>
+> **Feedback welcome!** Please report issues at https://github.com/nielspeter/claude-code-proxy/issues
 
 ## Features
 
