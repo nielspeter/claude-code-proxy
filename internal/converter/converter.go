@@ -310,8 +310,8 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 				thinkingText := extractReasoningText(detailMap)
 				if thinkingText != "" {
 					contentBlocks = append(contentBlocks, models.ContentBlock{
-						Type: "thinking",
-						Text: thinkingText,
+						Type:     "thinking",
+						Thinking: thinkingText, // Use Thinking field, not Text
 					})
 				}
 			}

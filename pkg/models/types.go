@@ -8,11 +8,12 @@ type ClaudeMessage struct {
 
 // ContentBlock represents a content block in Claude format
 type ContentBlock struct {
-	Type string      `json:"type"`
-	Text string      `json:"text,omitempty"`
-	ID   string      `json:"id,omitempty"`
-	Name string      `json:"name,omitempty"`
-	Input interface{} `json:"input,omitempty"`
+	Type     string      `json:"type"`
+	Text     string      `json:"text,omitempty"`
+	Thinking string      `json:"thinking,omitempty"` // For thinking blocks
+	ID       string      `json:"id,omitempty"`
+	Name     string      `json:"name,omitempty"`
+	Input    interface{} `json:"input,omitempty"`
 }
 
 // ClaudeRequest represents the full Claude API request
