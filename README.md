@@ -202,10 +202,6 @@ ANTHROPIC_DEFAULT_OPUS_MODEL=openai/gpt-5
 - `PORT` - Server port (default: `8082`)
 - `PASSTHROUGH_MODE` - Direct proxy to Anthropic API (default: `false`)
 
-**Optional - Performance:**
-- `MAX_TOKENS_LIMIT` - Maximum token limit (default: `400000`)
-- `REQUEST_TIMEOUT` - Request timeout in seconds (default: `90`)
-
 ## Project Structure
 
 ```
