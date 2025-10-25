@@ -1,6 +1,6 @@
 # Claude Code Proxy (Go)
 
-A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (o1/o3 reasoning), and Ollama (free local inference).
+A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (GPT-5 reasoning), and Ollama (free local inference).
 
 ## Features
 
@@ -11,7 +11,7 @@ A lightweight, production-ready HTTP proxy that enables Claude Code to work with
   - Proper SSE event formatting
 - ✅ **Multiple Provider Support** - OpenRouter, OpenAI Direct, and Ollama
   - **OpenRouter**: 200+ models (GPT, Grok, Gemini, etc.) through single API
-  - **OpenAI Direct**: Native o1/o3 reasoning model support
+  - **OpenAI Direct**: Native GPT-5 reasoning model support
   - **Ollama**: Free local inference with DeepSeek-R1, Llama3, Qwen, etc.
 - ✅ **Pattern-based routing** - Auto-detects Claude models and routes to appropriate backend models
 - ✅ **Zero dependencies** - Single ~10MB binary, no runtime needed
@@ -64,9 +64,9 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_API_KEY=sk-proj-your-openai-key
 
 # Model routing
-ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-4o
-ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-4o-mini
-ANTHROPIC_DEFAULT_OPUS_MODEL=o1-preview  # Reasoning model
+ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5
+ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5-mini
+ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5  # Reasoning model
 EOF
 ```
 
@@ -90,7 +90,7 @@ EOF
 | **Cost** | Pay-per-use | Pay-per-use | Free |
 | **Setup** | Easy | Easy | Requires local install |
 | **Models** | 200+ | OpenAI only | Open source only |
-| **Reasoning** | Yes (via GPT/Grok/etc) | Yes (o1/o3) | Yes (DeepSeek-R1) |
+| **Reasoning** | Yes (via GPT/Grok/etc) | Yes (GPT-5) | Yes (DeepSeek-R1) |
 | **Tool Calling** | Yes | Yes | Model dependent |
 | **Privacy** | Cloud | Cloud | 100% local |
 | **Speed** | Fast | Fast | Very fast (local) |
@@ -142,13 +142,12 @@ The proxy auto-detects Claude model names:
 |---------------------|---------------------|
 | `*opus*` | `gpt-5` |
 | `*sonnet-4*`, `*sonnet-5*` | `gpt-5` |
-| `*sonnet-3*` | `gpt-4o` |
 | `*haiku*` | `gpt-5-mini` |
 
 Override with env vars:
 ```bash
 ANTHROPIC_DEFAULT_OPUS_MODEL=gpt-5
-ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-4o
+ANTHROPIC_DEFAULT_SONNET_MODEL=gpt-5
 ANTHROPIC_DEFAULT_HAIKU_MODEL=gpt-5-mini
 ```
 
