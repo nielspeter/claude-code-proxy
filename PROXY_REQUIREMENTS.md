@@ -238,25 +238,30 @@ Claude Code then executes the tool and sends back:
 ## What Our Go Proxy Currently Does ✅
 
 1. ✅ Converts Claude request to OpenAI format
-2. ✅ Sends to OpenRouter
+2. ✅ Sends to OpenRouter/OpenAI-compatible providers
 3. ✅ Receives SSE stream with reasoning blocks
 4. ✅ Converts back to Claude format with proper events
 5. ✅ Sends correct content block structure with indices
 6. ✅ Includes usage information
-7. ✅ Handles thinking blocks properly
+7. ✅ Handles thinking blocks properly (with signature support)
 8. ✅ Removes malformed debug output
+9. ✅ Supports tool calling (tool_use ↔ tool_calls conversion)
+10. ✅ Accurate streaming token tracking
+11. ✅ Multiple backend provider support (OpenRouter, OpenAI, etc.)
+12. ✅ Pattern-based model routing
 
 ---
 
-## What Still Needs Verification
+## Feature Status
 
-Looking at session.jsonl, we should verify:
-- [ ] Tool use support (Claude Code expects this)
-- [ ] Multiple content blocks in single response
-- [ ] Stop reason handling
-- [ ] Error handling for malformed requests
-- [ ] Model validation and routing
-- [ ] Token limit enforcement
+All major features are now implemented and tested:
+- ✅ Tool use support (Claude Code tool_use blocks properly converted)
+- ✅ Multiple content blocks in single response
+- ✅ Stop reason handling (end_turn, tool_use, max_tokens)
+- ✅ Error handling for malformed requests
+- ✅ Model validation and routing (pattern-based + env overrides)
+- ✅ Token limit enforcement (configurable via MAX_TOKENS_LIMIT)
+- ✅ Comprehensive unit test coverage
 
 ---
 

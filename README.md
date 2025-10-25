@@ -1,14 +1,22 @@
 # Claude Code Proxy (Go)
 
-A lightweight, standalone HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers.
+A lightweight, production-ready HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers like OpenRouter, allowing access to GPT models, Grok, Gemini, and more through the Claude API interface.
 
 ## Features
 
-- ✅ **Pattern-based routing** - Auto-detects Claude models and routes to appropriate OpenAI models
+- ✅ **Full Claude Code Compatibility** - Complete support for all Claude Code features
+  - Tool calling (read, write, edit, glob, grep, bash, etc.)
+  - Extended thinking blocks with proper hiding/showing
+  - Streaming responses with real-time token tracking
+  - Proper SSE event formatting
+- ✅ **Pattern-based routing** - Auto-detects Claude models and routes to appropriate backend models
+- ✅ **OpenRouter Integration** - Access 200+ models through a single API
+- ✅ **Multiple Provider Support** - Route to GPT (OpenAI), Grok (X.AI), Gemini (Google), and more
 - ✅ **Zero dependencies** - Single ~10MB binary, no runtime needed
 - ✅ **Daemon mode** - Runs in background, serves multiple Claude Code sessions
 - ✅ **Fast startup** - < 10ms cold start
-- ✅ **Config flexibility** - Loads from `~/.claude/proxy.env`
+- ✅ **Config flexibility** - Loads from `~/.claude/proxy.env` or `.env`
+- ✅ **Passthrough mode** - Optional direct proxying to Anthropic API for debugging
 
 ## Quick Start
 
@@ -27,12 +35,26 @@ make build
 
 ### Configuration
 
-Create config file:
+Create config file at `~/.claude/proxy.env`:
 
 ```bash
 mkdir -p ~/.claude
 cat > ~/.claude/proxy.env << 'EOF'
-OPENAI_API_KEY=sk-your-key-here
+# For OpenRouter (recommended - access 200+ models)
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-your-openrouter-key
+
+# Model routing (examples using OpenRouter model names)
+ANTHROPIC_DEFAULT_SONNET_MODEL=x-ai/grok-code-fast-1
+ANTHROPIC_DEFAULT_HAIKU_MODEL=google/gemini-2.5-flash
+ANTHROPIC_DEFAULT_OPUS_MODEL=openai/gpt-5
+
+# Optional: For direct OpenAI access instead
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_API_KEY=sk-your-openai-key
+
+# Optional: Client validation (uncomment to enable)
+# ANTHROPIC_API_KEY=your-validation-key
 EOF
 ```
 
@@ -62,6 +84,17 @@ The `ccp` wrapper automatically:
 - Starts the proxy daemon (if not running)
 - Sets `ANTHROPIC_BASE_URL`
 - Execs `claude` with your arguments
+
+**Option 3: Use with Claude Code directly**
+
+```bash
+# Start the proxy
+./claude-code-proxy -d
+
+# Configure Claude Code to use the proxy
+export ANTHROPIC_BASE_URL=http://localhost:8082
+claude chat
+```
 
 ## Pattern-Based Routing
 
@@ -97,16 +130,38 @@ make build-all
 ## Configuration Reference
 
 **Required:**
-- `OPENAI_API_KEY` - Your OpenAI API key
+- `OPENAI_API_KEY` - Your OpenAI or OpenRouter API key
 
-**Optional:**
+**Optional - API Configuration:**
 - `OPENAI_BASE_URL` - API base URL (default: `https://api.openai.com/v1`)
+  - For OpenRouter: `https://openrouter.ai/api/v1`
+  - For other providers: Use their OpenAI-compatible endpoint
+
+**Optional - Model Routing:**
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` - Override opus routing (default: `gpt-5`)
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` - Override sonnet routing (default: version-aware)
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` - Override haiku routing (default: `gpt-5-mini`)
+
+Examples with OpenRouter:
+```bash
+ANTHROPIC_DEFAULT_SONNET_MODEL=x-ai/grok-code-fast-1
+ANTHROPIC_DEFAULT_HAIKU_MODEL=google/gemini-2.5-flash
+ANTHROPIC_DEFAULT_OPUS_MODEL=openai/gpt-5
+```
+
+**Optional - Security:**
 - `ANTHROPIC_API_KEY` - Client API key validation (optional)
-- `ANTHROPIC_DEFAULT_OPUS_MODEL` - Override opus routing
-- `ANTHROPIC_DEFAULT_SONNET_MODEL` - Override sonnet routing
-- `ANTHROPIC_DEFAULT_HAIKU_MODEL` - Override haiku routing
+  - If set, clients must provide this exact key
+  - Leave unset to disable validation
+
+**Optional - Server Settings:**
 - `HOST` - Server host (default: `0.0.0.0`)
 - `PORT` - Server port (default: `8082`)
+- `PASSTHROUGH_MODE` - Direct proxy to Anthropic API (default: `false`)
+
+**Optional - Performance:**
+- `MAX_TOKENS_LIMIT` - Maximum token limit (default: `400000`)
+- `REQUEST_TIMEOUT` - Request timeout in seconds (default: `90`)
 
 ## Project Structure
 
@@ -127,6 +182,33 @@ proxy/
 └── Makefile                  # Build automation
 ```
 
+## Supported Claude Code Features
+
+The proxy fully supports all Claude Code features:
+
+- **Tool Calling** - Complete support for all Claude Code tools
+  - File operations: `read`, `write`, `edit`
+  - Search operations: `glob`, `grep`
+  - Shell execution: `bash`
+  - Task management: `todowrite`, `todoread`
+  - And all other Claude Code tools
+
+- **Extended Thinking** - Proper thinking block support
+  - Thinking blocks are properly formatted and hidden in Claude Code UI
+  - Shows "Thought for Xs" indicator instead of full content
+  - Can be revealed with Ctrl+O in Claude Code
+  - Supports signature_delta events for authentication
+
+- **Streaming** - Real-time streaming responses
+  - Proper SSE (Server-Sent Events) formatting
+  - Accurate token usage tracking
+  - Low latency streaming from backend models
+
+- **Token Tracking** - Full usage metrics
+  - Input tokens counted accurately
+  - Output tokens tracked in real-time
+  - Cache metrics supported (when using Anthropic backend)
+
 ## Development
 
 ```bash
@@ -134,14 +216,55 @@ proxy/
 go run cmd/claude-code-proxy/main.go
 
 # Run tests
-make test
+go test ./...
+# Or with verbose output
+go test -v ./internal/converter
+
+# Run specific test
+go test -v ./internal/converter -run TestConvertMessagesWithComplexContent
 
 # Format code
-make fmt
+go fmt ./...
 
-# Lint
-make lint
+# Lint (requires golangci-lint)
+golangci-lint run
 ```
+
+## Testing
+
+The project includes comprehensive unit tests:
+
+```bash
+# Run all tests
+go test ./...
+
+# Run converter tests (includes tool calling tests)
+go test -v ./internal/converter
+
+# Run with coverage
+go test -cover ./...
+```
+
+## How It Works
+
+1. **Request Flow**:
+   - Claude Code sends Claude API format request to proxy
+   - Proxy converts Claude format → OpenAI format
+   - Proxy routes to OpenRouter/OpenAI/other provider
+   - Provider returns OpenAI format response
+   - Proxy converts back to Claude format
+   - Claude Code receives properly formatted response
+
+2. **Format Conversion**:
+   - Claude's `tool_use` blocks → OpenAI's `tool_calls` format
+   - OpenAI's `reasoning_details` → Claude's `thinking` blocks
+   - Maintains proper tool_use ↔ tool_result correspondence
+   - Preserves all metadata and signatures
+
+3. **Streaming**:
+   - Converts OpenAI SSE chunks to Claude SSE events
+   - Generates proper event sequence (message_start, content_block_start, deltas, etc.)
+   - Tracks content block indices for proper Claude Code rendering
 
 ## License
 
