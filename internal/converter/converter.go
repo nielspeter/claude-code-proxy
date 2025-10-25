@@ -10,6 +10,10 @@ import (
 )
 
 // Default model mappings when env overrides are not set
+// These can be overridden using:
+//   - ANTHROPIC_DEFAULT_OPUS_MODEL
+//   - ANTHROPIC_DEFAULT_SONNET_MODEL
+//   - ANTHROPIC_DEFAULT_HAIKU_MODEL
 const (
 	DefaultOpusModel   = "gpt-5"
 	DefaultSonnetModel = "gpt-5"
