@@ -141,7 +141,7 @@ The proxy auto-detects Claude model names:
 | Claude Model Pattern | Default OpenAI Model |
 |---------------------|---------------------|
 | `*opus*` | `gpt-5` |
-| `*sonnet-4*`, `*sonnet-5*` | `gpt-5` |
+| `*sonnet*` | `gpt-5` |
 | `*haiku*` | `gpt-5-mini` |
 
 Override with env vars:
