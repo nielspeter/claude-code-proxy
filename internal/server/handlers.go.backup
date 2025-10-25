@@ -1,0 +1,451 @@
+package server
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/claude-code-proxy/proxy/internal/config"
+	"github.com/claude-code-proxy/proxy/internal/converter"
+	"github.com/claude-code-proxy/proxy/pkg/models"
+	"github.com/gofiber/fiber/v2"
+)
+
+func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
+	// Debug: Log raw request
+	if cfg.Debug {
+		fmt.Printf("\n=== CLAUDE REQUEST ===\n%s\n===================\n", string(c.Body()))
+	}
+
+	// Parse Claude request
+	var claudeReq models.ClaudeRequest
+	if err := c.BodyParser(&claudeReq); err != nil {
+		// Log the error and raw body for debugging
+		fmt.Printf("[ERROR] Failed to parse request body: %v\n", err)
+		fmt.Printf("[ERROR] Raw body: %s\n", string(c.Body()))
+		return c.Status(400).JSON(fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "invalid_request_error",
+				"message": fmt.Sprintf("Invalid request body: %v", err),
+			},
+		})
+	}
+
+	// Validate API key (if configured)
+	if cfg.AnthropicAPIKey != "" {
+		apiKey := c.Get("x-api-key")
+		if apiKey != cfg.AnthropicAPIKey {
+			return c.Status(401).JSON(fiber.Map{
+				"type": "error",
+				"error": fiber.Map{
+					"type":    "authentication_error",
+					"message": "Invalid API key",
+				},
+			})
+		}
+	}
+
+	// Convert Claude request to OpenAI format
+	openaiReq, err := converter.ConvertRequest(claudeReq, cfg)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "invalid_request_error",
+				"message": err.Error(),
+			},
+		})
+	}
+
+	// Debug: Log converted OpenAI request
+	if cfg.Debug {
+		openaiReqJSON, _ := json.MarshalIndent(openaiReq, "", "  ")
+		fmt.Printf("\n=== OPENAI REQUEST ===\n%s\n===================\n", string(openaiReqJSON))
+		if len(claudeReq.Tools) > 0 {
+			fmt.Printf("[DEBUG] Request has %d tools\n", len(claudeReq.Tools))
+			for i, tool := range openaiReq.Tools {
+				fmt.Printf("[DEBUG] Tool %d: %s\n", i, tool.Function.Name)
+			}
+		}
+	}
+
+	// Handle streaming vs non-streaming
+	if openaiReq.Stream != nil && *openaiReq.Stream {
+		return handleStreamingMessages(c, openaiReq, claudeReq.Model, cfg)
+	}
+
+	// Non-streaming response
+	openaiResp, err := callOpenAI(openaiReq, cfg)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "api_error",
+				"message": fmt.Sprintf("OpenAI API error: %v", err),
+			},
+		})
+	}
+
+	// Debug: Log OpenAI response
+	if cfg.Debug {
+		openaiRespJSON, _ := json.MarshalIndent(openaiResp, "", "  ")
+		fmt.Printf("\n=== OPENAI RESPONSE ===\n%s\n====================\n", string(openaiRespJSON))
+		if len(openaiResp.Choices) > 0 {
+			choice := openaiResp.Choices[0]
+			fmt.Printf("[DEBUG] OpenAI response has %d tool_calls\n", len(choice.Message.ToolCalls))
+			for i, tc := range choice.Message.ToolCalls {
+				fmt.Printf("[DEBUG] ToolCall %d: ID=%s, Name=%s\n", i, tc.ID, tc.Function.Name)
+			}
+		}
+	}
+
+	// Convert OpenAI response to Claude format
+	claudeResp, err := converter.ConvertResponse(openaiResp, claudeReq.Model)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"type": "error",
+			"error": fiber.Map{
+				"type":    "api_error",
+				"message": fmt.Sprintf("Response conversion error: %v", err),
+			},
+		})
+	}
+
+	// Debug: Log Claude response
+	if cfg.Debug {
+		claudeRespJSON, _ := json.MarshalIndent(claudeResp, "", "  ")
+		fmt.Printf("\n=== CLAUDE RESPONSE ===\n%s\n====================\n\n", string(claudeRespJSON))
+		fmt.Printf("[DEBUG] Claude response has %d content blocks\n", len(claudeResp.Content))
+		for i, block := range claudeResp.Content {
+			fmt.Printf("[DEBUG] Block %d: type=%s", i, block.Type)
+			if block.Type == "tool_use" {
+				fmt.Printf(", name=%s, id=%s", block.Name, block.ID)
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	return c.JSON(claudeResp)
+}
+
+// handleStreamingMessages handles streaming requests
+func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, requestedModel string, cfg *config.Config) error {
+	// Set SSE headers
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("X-Accel-Buffering", "no")
+
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		// Marshal request
+		reqBody, err := json.Marshal(openaiReq)
+		if err != nil {
+			writeSSEError(w, fmt.Sprintf("failed to marshal request: %v", err))
+			return
+		}
+
+		// Build API URL
+		apiURL := cfg.OpenAIBaseURL + "/chat/completions"
+
+		// Create HTTP request
+		httpReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
+		if err != nil {
+			writeSSEError(w, fmt.Sprintf("failed to create request: %v", err))
+			return
+		}
+
+		// Set headers
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+
+		// Add stream options for usage tracking
+		if openaiReq.Stream != nil && *openaiReq.Stream {
+			// OpenAI SDK adds stream_options for usage tracking
+			// Let's ensure we're requesting usage data in the stream
+			fmt.Fprintf(w, ": Starting stream conversion\n\n")
+			w.Flush()
+		}
+
+		// Create HTTP client
+		client := &http.Client{
+			Timeout: 300 * time.Second, // Longer timeout for streaming
+		}
+
+		// Make request
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			writeSSEError(w, fmt.Sprintf("request failed: %v", err))
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			writeSSEError(w, fmt.Sprintf("OpenAI API returned status %d: %s", resp.StatusCode, string(body)))
+			return
+		}
+
+		// Stream conversion
+		streamOpenAIToClaude(w, resp.Body, requestedModel)
+	})
+
+	return nil
+}
+
+// streamOpenAIToClaude converts OpenAI SSE stream to Claude SSE format
+func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel string) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // Increase buffer size
+	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	contentIndex := 0
+	hasStarted := false
+	contentBlockStarted := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		// Check for [DONE] marker
+		if strings.Contains(line, "[DONE]") {
+			// Send content_block_stop if block was started
+			if contentBlockStarted {
+				writeSSEEvent(w, "content_block_stop", map[string]interface{}{
+					"type":  "content_block_stop",
+					"index": contentIndex,
+				})
+				w.Flush()
+			}
+
+			// Send message_stop event
+			writeSSEEvent(w, "message_stop", map[string]interface{}{
+				"type": "message_stop",
+			})
+			w.Flush()
+			break
+		}
+
+		// Parse data line
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		dataJSON := strings.TrimPrefix(line, "data: ")
+
+		var chunk map[string]interface{}
+		if err := json.Unmarshal([]byte(dataJSON), &chunk); err != nil {
+			continue
+		}
+
+		// Extract delta from choices
+		choices, ok := chunk["choices"].([]interface{})
+		if !ok || len(choices) == 0 {
+			continue
+		}
+
+		choice := choices[0].(map[string]interface{})
+		delta, ok := choice["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Send message_start and content_block_start on first chunk
+		if !hasStarted {
+			// Send message_start
+			writeSSEEvent(w, "message_start", map[string]interface{}{
+				"type": "message_start",
+				"message": map[string]interface{}{
+					"id":            messageID,
+					"type":          "message",
+					"role":          "assistant",
+					"model":         requestedModel,
+					"content":       []interface{}{},
+					"stop_reason":   nil,
+					"stop_sequence": nil,
+					"usage": map[string]interface{}{
+						"input_tokens":  0,
+						"output_tokens": 0,
+					},
+				},
+			})
+
+			// Immediately send content_block_start (don't wait for content)
+			writeSSEEvent(w, "content_block_start", map[string]interface{}{
+				"type":  "content_block_start",
+				"index": contentIndex,
+				"content_block": map[string]interface{}{
+					"type": "text",
+					"text": "",
+				},
+			})
+
+			// Send ping event (matches Python impl)
+			writeSSEEvent(w, "ping", map[string]interface{}{
+				"type": "ping",
+			})
+
+			w.Flush()
+			hasStarted = true
+			contentBlockStarted = true
+		}
+
+		// Handle content delta (normal content)
+		if content, ok := delta["content"].(string); ok && content != "" {
+			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": contentIndex,
+				"delta": map[string]interface{}{
+					"type": "text_delta",
+					"text": content,
+				},
+			})
+			w.Flush()
+		}
+
+		// Handle reasoning delta (GPT-5 reasoning mode)
+		if reasoning, ok := delta["reasoning"].(string); ok && reasoning != "" {
+			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+				"type":  "content_block_delta",
+				"index": contentIndex,
+				"delta": map[string]interface{}{
+					"type": "text_delta",
+					"text": reasoning,
+				},
+			})
+			w.Flush()
+		}
+
+		// Handle finish reason
+		if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
+			// Send content_block_stop if a block was started
+			if contentBlockStarted {
+				writeSSEEvent(w, "content_block_stop", map[string]interface{}{
+					"type":  "content_block_stop",
+					"index": contentIndex,
+				})
+				w.Flush()
+				contentBlockStarted = false // Mark as stopped
+			}
+
+			// Send message_delta with stop_reason
+			claudeStopReason := convertFinishReasonStreaming(finishReason)
+			writeSSEEvent(w, "message_delta", map[string]interface{}{
+				"type": "message_delta",
+				"delta": map[string]interface{}{
+					"stop_reason": claudeStopReason,
+				},
+				"usage": map[string]interface{}{
+					"output_tokens": 0,
+				},
+			})
+			w.Flush()
+		}
+	}
+
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		writeSSEError(w, fmt.Sprintf("stream read error: %v", err))
+	}
+}
+
+// writeSSEEvent writes a Server-Sent Event
+func writeSSEEvent(w *bufio.Writer, event string, data interface{}) {
+	dataJSON, _ := json.Marshal(data)
+	fmt.Fprintf(w, "event: %s\n", event)
+	fmt.Fprintf(w, "data: %s\n\n", string(dataJSON))
+}
+
+// writeSSEError writes an error event
+func writeSSEError(w *bufio.Writer, message string) {
+	writeSSEEvent(w, "error", map[string]interface{}{
+		"type": "error",
+		"error": map[string]interface{}{
+			"type":    "api_error",
+			"message": message,
+		},
+	})
+	w.Flush()
+}
+
+// convertFinishReasonStreaming converts OpenAI finish reason to Claude format (streaming)
+func convertFinishReasonStreaming(openaiReason string) string {
+	switch openaiReason {
+	case "stop":
+		return "end_turn"
+	case "length":
+		return "max_tokens"
+	case "tool_calls":
+		return "tool_use"
+	default:
+		return "end_turn"
+	}
+}
+
+// callOpenAI makes an HTTP request to the OpenAI API
+func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIResponse, error) {
+	// Marshal request to JSON
+	reqBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Build API URL
+	apiURL := cfg.OpenAIBaseURL + "/chat/completions"
+
+	// Create HTTP request
+	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 90 * time.Second,
+	}
+
+	// Make request
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check for errors
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenAI API returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// Parse response
+	var openaiResp models.OpenAIResponse
+	if err := json.Unmarshal(respBody, &openaiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &openaiResp, nil
+}
+
+func handleCountTokens(c *fiber.Ctx, cfg *config.Config) error {
+	// Simple token counting endpoint
+	return c.JSON(fiber.Map{
+		"input_tokens": 100,
+	})
+}
