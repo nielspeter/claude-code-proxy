@@ -76,7 +76,7 @@ func Start(cfg *config.Config) error {
 		<-sigChan
 		fmt.Println("\n🛑 Shutting down...")
 		daemon.Cleanup()
-		app.Shutdown()
+		_ = app.Shutdown()
 	}()
 
 	// Start server
