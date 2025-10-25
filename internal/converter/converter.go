@@ -83,21 +83,39 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 		Stream:      claudeReq.Stream,
 	}
 
-	// Enable usage tracking for streaming
-	// Support both OpenAI standard and OpenRouter formats
+	// Enable usage tracking and reasoning - provider-specific
 	if claudeReq.Stream != nil && *claudeReq.Stream {
-		// OpenAI standard format
-		openaiReq.StreamOptions = map[string]interface{}{
-			"include_usage": true,
-		}
-		// OpenRouter format
-		openaiReq.Usage = map[string]interface{}{
-			"include": true,
-		}
-		// Enable reasoning tokens (thinking) - OpenRouter format
-		// This enables extended thinking for models that support it
-		openaiReq.Reasoning = map[string]interface{}{
-			"enabled": true, // Enable with default medium effort
+		provider := cfg.DetectProvider()
+
+		switch provider {
+		case config.ProviderOpenRouter:
+			// OpenRouter-specific format
+			openaiReq.StreamOptions = map[string]interface{}{
+				"include_usage": true,
+			}
+			openaiReq.Usage = map[string]interface{}{
+				"include": true,
+			}
+			openaiReq.Reasoning = map[string]interface{}{
+				"enabled": true,
+			}
+
+		case config.ProviderOpenAI:
+			// OpenAI supports stream_options and reasoning (GPT-5 models)
+			openaiReq.StreamOptions = map[string]interface{}{
+				"include_usage": true,
+			}
+		// GPT-5 models: Use Chat Completions reasoning_effort parameter
+		openaiReq.ReasoningEffort = "medium" // minimal | low | medium | high
+
+		case config.ProviderOllama:
+			// Force Ollama to use tools when they're provided
+			// Check claudeReq.Tools since openaiReq.Tools hasn't been set yet
+			if len(claudeReq.Tools) > 0 {
+				// Set tool_choice to "required" to force tool usage
+				// This helps with models that don't naturally choose to use tools
+				openaiReq.ToolChoice = "required"
+			}
 		}
 	}
 

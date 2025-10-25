@@ -44,6 +44,9 @@ type Config struct {
 	// Debug logging
 	Debug bool
 
+	// Simple logging - one-line summary per request
+	SimpleLog bool
+
 	// Passthrough mode - directly proxy to Anthropic without conversion
 	PassthroughMode bool
 
@@ -64,8 +67,8 @@ func Load() (*Config, error) {
 
 	for _, loc := range locations {
 		if _, err := os.Stat(loc); err == nil {
-			// File exists, load it
-			if err := godotenv.Load(loc); err == nil {
+			// File exists, load it (overload to override existing env vars)
+			if err := godotenv.Overload(loc); err == nil {
 				fmt.Printf("📁 Loaded config from: %s\n", loc)
 				break
 			}

@@ -84,6 +84,20 @@ func Start(cfg *config.Config) error {
 	} else {
 		fmt.Printf("   Mode: Conversion (via %s)\n", cfg.OpenAIBaseURL)
 		fmt.Printf("   Model Routing: %s\n", getRoutingMode(cfg))
+
+		// Show actual model mappings
+		if cfg.OpusModel != "" || cfg.SonnetModel != "" || cfg.HaikuModel != "" {
+			fmt.Printf("   Models:\n")
+			if cfg.OpusModel != "" {
+				fmt.Printf("     - Opus   → %s\n", cfg.OpusModel)
+			}
+			if cfg.SonnetModel != "" {
+				fmt.Printf("     - Sonnet → %s\n", cfg.SonnetModel)
+			}
+			if cfg.HaikuModel != "" {
+				fmt.Printf("     - Haiku  → %s\n", cfg.HaikuModel)
+			}
+		}
 	}
 
 	return app.Listen(addr)

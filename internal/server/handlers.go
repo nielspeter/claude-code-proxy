@@ -86,8 +86,11 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 
 	// Handle streaming vs non-streaming
 	if openaiReq.Stream != nil && *openaiReq.Stream {
-		return handleStreamingMessages(c, openaiReq, claudeReq.Model, cfg)
+		return handleStreamingMessages(c, openaiReq, cfg)
 	}
+
+	// Track timing for simple log
+	startTime := time.Now()
 
 	// Non-streaming response
 	openaiResp, err := callOpenAI(openaiReq, cfg)
@@ -140,11 +143,29 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 		}
 	}
 
+	// Simple log: one-line summary
+	if cfg.SimpleLog {
+		duration := time.Since(startTime).Seconds()
+		tokensPerSec := 0.0
+		if duration > 0 && claudeResp.Usage.OutputTokens > 0 {
+			tokensPerSec = float64(claudeResp.Usage.OutputTokens) / duration
+		}
+		fmt.Printf("[REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+			cfg.OpenAIBaseURL,
+			openaiReq.Model,
+			claudeResp.Usage.InputTokens,
+			claudeResp.Usage.OutputTokens,
+			tokensPerSec)
+	}
+
 	return c.JSON(claudeResp)
 }
 
 // handleStreamingMessages handles streaming requests
-func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, requestedModel string, cfg *config.Config) error {
+func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg *config.Config) error {
+	// Track timing for simple log
+	startTime := time.Now()
+
 	// Set SSE headers
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
@@ -231,7 +252,7 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, requ
 		}
 
 		// Stream conversion
-		streamOpenAIToClaude(w, resp.Body, requestedModel, cfg)
+		streamOpenAIToClaude(w, resp.Body, openaiReq.Model, cfg, startTime)
 
 		if cfg.Debug {
 			fmt.Printf("[DEBUG] StreamWriter: Completed\n")
@@ -253,7 +274,7 @@ type ToolCallState struct {
 
 // streamOpenAIToClaude converts OpenAI SSE stream to Claude SSE format
 // This implementation matches the Python version line-by-line
-func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel string, cfg *config.Config) {
+func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel string, cfg *config.Config, startTime time.Time) {
 	if cfg.Debug {
 		fmt.Printf("[DEBUG] streamOpenAIToClaude: Starting conversion\n")
 	}
@@ -290,7 +311,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 			"id":            messageID,
 			"type":          "message",
 			"role":          "assistant",
-			"model":         requestedModel,
+			"model":         providerModel,
 			"content":       []interface{}{},
 			"stop_reason":   nil,
 			"stop_sequence": nil,
@@ -350,10 +371,22 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 				usageJSON, _ := json.Marshal(usage)
 				fmt.Printf("[DEBUG] Received usage from OpenAI: %s\n", string(usageJSON))
 			}
-			usageData = map[string]interface{}{
-				"input_tokens":  usage["prompt_tokens"],
-				"output_tokens": usage["completion_tokens"],
+
+			// Convert float64 to int for token counts (JSON unmarshals numbers as float64)
+			inputTokens := 0
+			outputTokens := 0
+			if val, ok := usage["prompt_tokens"].(float64); ok {
+				inputTokens = int(val)
 			}
+			if val, ok := usage["completion_tokens"].(float64); ok {
+				outputTokens = int(val)
+			}
+
+			usageData = map[string]interface{}{
+				"input_tokens":  inputTokens,
+				"output_tokens": outputTokens,
+			}
+
 			// Add cache metrics if present
 			if promptTokensDetails, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
 				if cachedTokens, ok := promptTokensDetails["cached_tokens"].(float64); ok && cachedTokens > 0 {
@@ -523,6 +556,12 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 
 		// Handle tool call deltas (matches Python lines 149-198)
 		if toolCallsRaw, ok := delta["tool_calls"]; ok {
+			// Debug: Log raw tool_calls from provider
+			if cfg.Debug {
+				toolCallsJSON, _ := json.Marshal(toolCallsRaw)
+				fmt.Printf("[DEBUG] Raw tool_calls delta: %s\n", string(toolCallsJSON))
+			}
+
 			toolCalls, ok := toolCallsRaw.([]interface{})
 			if ok && len(toolCalls) > 0 {
 				for _, tcRaw := range toolCalls {
@@ -696,6 +735,44 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, requestedModel stri
 		"type": "message_stop",
 	})
 	w.Flush()
+
+	// Simple log: one-line summary
+	if cfg.SimpleLog {
+		inputTokens := 0
+		outputTokens := 0
+
+		// Try to extract tokens from various possible formats
+		if val, ok := usageData["input_tokens"].(int); ok {
+			inputTokens = val
+		} else if val, ok := usageData["input_tokens"].(float64); ok {
+			inputTokens = int(val)
+		}
+
+		if val, ok := usageData["output_tokens"].(int); ok {
+			outputTokens = val
+		} else if val, ok := usageData["output_tokens"].(float64); ok {
+			outputTokens = int(val)
+		}
+
+		// Debug: show what we actually have in usageData
+		if cfg.Debug {
+			fmt.Printf("[DEBUG] usageData: %+v\n", usageData)
+		}
+
+		// Calculate tokens per second
+		duration := time.Since(startTime).Seconds()
+		tokensPerSec := 0.0
+		if duration > 0 && outputTokens > 0 {
+			tokensPerSec = float64(outputTokens) / duration
+		}
+
+		fmt.Printf("[REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+			cfg.OpenAIBaseURL,
+			providerModel,
+			inputTokens,
+			outputTokens,
+			tokensPerSec)
+	}
 
 	// Check for scanner errors
 	if err := scanner.Err(); err != nil {

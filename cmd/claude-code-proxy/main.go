@@ -12,6 +12,7 @@ import (
 func main() {
 	// Parse command and flags
 	debug := false
+	simpleLog := false
 	command := ""
 
 	if len(os.Args) > 1 {
@@ -20,6 +21,8 @@ func main() {
 			switch arg {
 			case "-d", "--debug":
 				debug = true
+			case "-s", "--simple":
+				simpleLog = true
 			case "stop", "status", "version", "help", "-h", "--help":
 				command = arg
 			}
@@ -56,6 +59,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Enable simple logging if requested
+	if simpleLog {
+		cfg.SimpleLog = true
+		fmt.Println("📊 Simple log mode enabled - one-line summaries per request")
+	}
+
 	// Check if already running
 	if daemon.IsRunning() {
 		fmt.Println("Proxy is already running")
@@ -79,14 +88,15 @@ func printHelp() {
 	fmt.Println(`Claude Code Proxy - OpenAI API proxy for Claude Code
 
 Usage:
-  claude-code-proxy [-d|--debug]  Start the proxy daemon
-  claude-code-proxy stop          Stop the proxy daemon
-  claude-code-proxy status        Check if proxy is running
-  claude-code-proxy version       Show version
-  claude-code-proxy help          Show this help
+  claude-code-proxy [-d|--debug] [-s|--simple]  Start the proxy daemon
+  claude-code-proxy stop                        Stop the proxy daemon
+  claude-code-proxy status                      Check if proxy is running
+  claude-code-proxy version                     Show version
+  claude-code-proxy help                        Show this help
 
 Flags:
-  -d, --debug    Enable debug mode (logs full requests/responses)
+  -d, --debug     Enable debug mode (logs full requests/responses)
+  -s, --simple    Enable simple log mode (one-line summary per request)
 
 Configuration:
   Config file locations (checked in order):
