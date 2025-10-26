@@ -1,3 +1,10 @@
+// Package server implements the HTTP proxy server that translates between
+// Claude API format and OpenAI-compatible providers (OpenRouter, OpenAI Direct, Ollama).
+//
+// The server receives Claude API requests on /v1/messages, converts them to OpenAI format,
+// forwards them to the configured provider, and converts responses back to Claude format.
+// It handles both streaming (SSE) and non-streaming responses, including tool calls and
+// thinking blocks from reasoning models.
 package server
 
 import (
@@ -15,12 +22,17 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
+const (
+	// ProxyVersion is the current version of the Claude Code Proxy
+	ProxyVersion = "1.0.0"
+)
+
 // Start initializes and starts the HTTP server
 func Start(cfg *config.Config) error {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 		ServerHeader:          "Claude-Code-Proxy",
-		AppName:               "Claude Code Proxy v1.0.0",
+		AppName:               "Claude Code Proxy v" + ProxyVersion,
 	})
 
 	// Middleware
@@ -42,7 +54,7 @@ func Start(cfg *config.Config) error {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
-			"version": "1.0.0",
+			"version": ProxyVersion,
 		})
 	})
 
@@ -50,7 +62,7 @@ func Start(cfg *config.Config) error {
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "Claude Code Proxy",
-			"version": "1.0.0",
+			"version": ProxyVersion,
 			"status":  "running",
 			"config": fiber.Map{
 				"openai_base_url": cfg.OpenAIBaseURL,

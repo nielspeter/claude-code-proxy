@@ -100,7 +100,7 @@ Flags:
 
 Configuration:
   Config file locations (checked in order):
-    1. ./​.env
+    1. ./.env
     2. ~/.claude/proxy.env
     3. ~/.claude-code-proxy
 
