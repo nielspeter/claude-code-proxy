@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -263,5 +264,312 @@ func TestProviderIsolation(t *testing.T) {
 			t.Logf("REQUIREMENT: When OPENAI_BASE_URL=%s (%s), proxy must NOT make requests to %s",
 				scenario.configuredURL, scenario.expectedProvider, scenario.shouldNotCallURL)
 		})
+	}
+}
+
+// TestLoadWithDebug tests loading config with debug mode enabled
+func TestLoadWithDebug(t *testing.T) {
+	// Save original env
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	// Set required env vars
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	os.Setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+	cfg, err := LoadWithDebug(true)
+	if err != nil {
+		t.Fatalf("LoadWithDebug failed: %v", err)
+	}
+
+	if !cfg.Debug {
+		t.Errorf("Expected Debug=true, got %v", cfg.Debug)
+	}
+
+	if cfg.OpenAIAPIKey != "test-key" {
+		t.Errorf("Expected API key 'test-key', got %q", cfg.OpenAIAPIKey)
+	}
+}
+
+// TestIsLocalhost tests localhost detection
+func TestIsLocalhost(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseURL  string
+		expected bool
+	}{
+		{
+			name:     "localhost with default port",
+			baseURL:  "http://localhost:11434/v1",
+			expected: true,
+		},
+		{
+			name:     "localhost with custom port",
+			baseURL:  "http://localhost:8080/v1",
+			expected: true,
+		},
+		{
+			name:     "127.0.0.1",
+			baseURL:  "http://127.0.0.1:11434/v1",
+			expected: true,
+		},
+		{
+			name:     "OpenRouter",
+			baseURL:  "https://openrouter.ai/api/v1",
+			expected: false,
+		},
+		{
+			name:     "OpenAI Direct",
+			baseURL:  "https://api.openai.com/v1",
+			expected: false,
+		},
+		{
+			name:     "Custom host",
+			baseURL:  "http://192.168.1.100:11434/v1",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				OpenAIBaseURL: tt.baseURL,
+			}
+
+			result := cfg.IsLocalhost()
+			if result != tt.expected {
+				t.Errorf("IsLocalhost() for %q = %v, want %v",
+					tt.baseURL, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestOpenRouterSpecificSettings tests OpenRouter app name and URL settings
+func TestOpenRouterSpecificSettings(t *testing.T) {
+	// Save original env
+	originalAppName := os.Getenv("OPENROUTER_APP_NAME")
+	originalAppURL := os.Getenv("OPENROUTER_APP_URL")
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		os.Setenv("OPENROUTER_APP_NAME", originalAppName)
+		os.Setenv("OPENROUTER_APP_URL", originalAppURL)
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	// Set env vars
+	os.Setenv("OPENROUTER_APP_NAME", "Claude-Code-Proxy")
+	os.Setenv("OPENROUTER_APP_URL", "https://github.com/example/repo")
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	os.Setenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.OpenRouterAppName != "Claude-Code-Proxy" {
+		t.Errorf("Expected app name 'Claude-Code-Proxy', got %q", cfg.OpenRouterAppName)
+	}
+
+	if cfg.OpenRouterAppURL != "https://github.com/example/repo" {
+		t.Errorf("Expected app URL 'https://github.com/example/repo', got %q", cfg.OpenRouterAppURL)
+	}
+
+	if cfg.DetectProvider() != ProviderOpenRouter {
+		t.Errorf("Expected OpenRouter provider, got %v", cfg.DetectProvider())
+	}
+}
+
+// TestOllamaWithoutAPIKey tests that Ollama works without API key
+func TestOllamaWithoutAPIKey(t *testing.T) {
+	// Save original env
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	// Clear API key and set Ollama URL
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Setenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load should succeed for Ollama without API key: %v", err)
+	}
+
+	// Should have dummy key for Ollama
+	if cfg.OpenAIAPIKey != "ollama" {
+		t.Errorf("Expected dummy API key 'ollama', got %q", cfg.OpenAIAPIKey)
+	}
+
+	if cfg.DetectProvider() != ProviderOllama {
+		t.Errorf("Expected Ollama provider, got %v", cfg.DetectProvider())
+	}
+}
+
+// TestMissingAPIKeyForOpenAI tests that load fails without API key for OpenAI
+func TestMissingAPIKeyForOpenAI(t *testing.T) {
+	// Save original env
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	// Clear API key and set OpenAI URL
+	os.Unsetenv("OPENAI_API_KEY")
+	os.Setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Errorf("Load should fail when OpenAI API key is missing")
+	}
+
+	_ = cfg
+}
+
+// TestHostAndPortDefaults tests default host and port values
+func TestHostAndPortDefaults(t *testing.T) {
+	// Save original env
+	originalHost := os.Getenv("HOST")
+	originalPort := os.Getenv("PORT")
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		if originalHost != "" {
+			os.Setenv("HOST", originalHost)
+		} else {
+			os.Unsetenv("HOST")
+		}
+		if originalPort != "" {
+			os.Setenv("PORT", originalPort)
+		} else {
+			os.Unsetenv("PORT")
+		}
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	// Clear host and port
+	os.Unsetenv("HOST")
+	os.Unsetenv("PORT")
+	os.Setenv("OPENAI_API_KEY", "test-key")
+	os.Setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.Host != "0.0.0.0" {
+		t.Errorf("Expected default host '0.0.0.0', got %q", cfg.Host)
+	}
+
+	if cfg.Port != "8082" {
+		t.Errorf("Expected default port '8082', got %q", cfg.Port)
+	}
+}
+
+// TestPassthroughMode tests passthrough mode configuration
+func TestPassthroughMode(t *testing.T) {
+	// Save original env
+	originalMode := os.Getenv("PASSTHROUGH_MODE")
+	originalKey := os.Getenv("OPENAI_API_KEY")
+	originalBaseURL := os.Getenv("OPENAI_BASE_URL")
+	defer func() {
+		if originalMode != "" {
+			os.Setenv("PASSTHROUGH_MODE", originalMode)
+		} else {
+			os.Unsetenv("PASSTHROUGH_MODE")
+		}
+		os.Setenv("OPENAI_API_KEY", originalKey)
+		os.Setenv("OPENAI_BASE_URL", originalBaseURL)
+	}()
+
+	tests := []struct {
+		name     string
+		envValue string
+		expected bool
+	}{
+		{"enabled with true", "true", true},
+		{"enabled with 1", "1", true},
+		{"enabled with yes", "yes", true},
+		{"disabled with false", "false", false},
+		{"disabled with 0", "0", false},
+		{"default is disabled", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue != "" {
+				os.Setenv("PASSTHROUGH_MODE", tt.envValue)
+			} else {
+				os.Unsetenv("PASSTHROUGH_MODE")
+			}
+			os.Setenv("OPENAI_API_KEY", "test-key")
+			os.Setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load failed: %v", err)
+			}
+
+			if cfg.PassthroughMode != tt.expected {
+				t.Errorf("Expected PassthroughMode=%v, got %v", tt.expected, cfg.PassthroughMode)
+			}
+		})
+	}
+}
+
+// TestMultipleEnvFiles tests that env files are loaded in correct priority order
+func TestMultipleEnvFiles(t *testing.T) {
+	// Create temporary directory for test env files
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	originalCwd, _ := os.Getwd()
+
+	// Create mock .claude directory
+	claudeDir := filepath.Join(tempDir, ".claude")
+	os.MkdirAll(claudeDir, 0755)
+
+	// Create .env file in current directory
+	localEnvFile := filepath.Join(tempDir, ".env")
+	os.WriteFile(localEnvFile, []byte("OPENAI_API_KEY=local-key\nOPENAI_BASE_URL=https://local.example.com"), 0644)
+
+	// Create ~/.claude/proxy.env file
+	claudeEnvFile := filepath.Join(claudeDir, "proxy.env")
+	os.WriteFile(claudeEnvFile, []byte("OPENAI_API_KEY=claude-key"), 0644)
+
+	// Setup environment
+	os.Chdir(tempDir)
+	os.Setenv("HOME", tempDir)
+
+	defer func() {
+		os.Chdir(originalCwd)
+		os.Setenv("HOME", originalHome)
+	}()
+
+	// Load config - should pick up local .env first
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.OpenAIAPIKey != "local-key" {
+		t.Errorf("Expected local API key, got %q", cfg.OpenAIAPIKey)
+	}
+
+	if cfg.OpenAIBaseURL != "https://local.example.com" {
+		t.Errorf("Expected local base URL, got %q", cfg.OpenAIBaseURL)
 	}
 }
