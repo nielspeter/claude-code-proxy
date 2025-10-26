@@ -12,42 +12,7 @@ linters:
     - staticcheck
     - unused
 
-linters-settings:
-  errcheck:
-    check-blank: false
-    exclude-functions:
-      - fmt.Fprintf
-      - fmt.Fprintln
-      - (io.Closer).Close
-      - (*net/http.ResponseWriter).Write
-      - (*bufio.Writer).Flush
-    ignore: "fmt:.*,io:EOF"
-
 issues:
-  exclude-use-default: true
-  exclude-rules:
-    # Exclude all error checks in test files
-    - path: _test\.go
-      linters:
-        - errcheck
-        - staticcheck
-    # Exclude common patterns that are safe to ignore
-    - text: "Error return value of.*os\\.(Setenv|Unsetenv|MkdirAll|WriteFile|Chdir|Remove).*is not checked"
-      linters:
-        - errcheck
-    - text: "Error return value of.*json\\.Marshal.*is not checked"
-      linters:
-        - errcheck
-    - text: "Error return value.*Flush.*is not checked"
-      linters:
-        - errcheck
-    - text: "Error return value of.*resp\\.Body\\.Close.*is not checked"
-      linters:
-        - errcheck
-    - text: "Error return value.*fmt\\.Fprintf.*is not checked"
-      linters:
-        - errcheck
-    - text: "Error return value is not checked"
-      path: _test\.go
-      linters:
-        - errcheck
+  # Exclude test files from linting
+  exclude-dirs:
+    - _test.go
