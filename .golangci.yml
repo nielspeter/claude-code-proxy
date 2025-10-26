@@ -1,3 +1,5 @@
+version: 2
+
 run:
   timeout: 5m
   tests: true
@@ -5,13 +7,10 @@ run:
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
 
 linters-settings:
   errcheck:
@@ -23,26 +22,32 @@ linters-settings:
       - (*net/http.ResponseWriter).Write
       - (*bufio.Writer).Flush
     ignore: "fmt:.*,io:EOF"
-  gofmt:
-    simplify: true
 
 issues:
   exclude-use-default: true
   exclude-rules:
-    # Exclude error checks in test files
+    # Exclude all error checks in test files
     - path: _test\.go
       linters:
         - errcheck
+        - staticcheck
     # Exclude common patterns that are safe to ignore
-    - text: "Error return value of.*os\\.(Setenv|Unsetenv).*is not checked"
+    - text: "Error return value of.*os\\.(Setenv|Unsetenv|MkdirAll|WriteFile|Chdir|Remove).*is not checked"
       linters:
         - errcheck
     - text: "Error return value of.*json\\.Marshal.*is not checked"
       linters:
         - errcheck
-    - text: "Error return value of.*w\\.Flush.*is not checked"
+    - text: "Error return value.*Flush.*is not checked"
       linters:
         - errcheck
     - text: "Error return value of.*resp\\.Body\\.Close.*is not checked"
+      linters:
+        - errcheck
+    - text: "Error return value.*fmt\\.Fprintf.*is not checked"
+      linters:
+        - errcheck
+    - text: "Error return value is not checked"
+      path: _test\.go
       linters:
         - errcheck

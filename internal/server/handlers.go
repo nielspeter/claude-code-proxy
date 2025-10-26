@@ -16,6 +16,21 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
+// addOpenRouterHeaders adds OpenRouter-specific HTTP headers for better rate limits.
+// Sets HTTP-Referer and X-Title headers when configured, which helps with OpenRouter's
+// rate limiting and usage tracking.
+func addOpenRouterHeaders(req *http.Request, cfg *config.Config) {
+	if cfg.OpenRouterAppURL != "" {
+		req.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
+	}
+	if cfg.OpenRouterAppName != "" {
+		req.Header.Set("X-Title", cfg.OpenRouterAppName)
+	}
+}
+
+// handleMessages is the main handler for /v1/messages endpoint.
+// It parses Claude requests, converts them to OpenAI format, and routes to either
+// streaming or non-streaming handlers based on the request's stream parameter.
 func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 	// Debug: Log raw request
 	if cfg.Debug {
@@ -163,7 +178,9 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 	return c.JSON(claudeResp)
 }
 
-// handleStreamingMessages handles streaming requests
+// handleStreamingMessages handles streaming SSE responses from the provider.
+// It forwards the OpenAI request, receives streaming chunks, and converts them to
+// Claude's SSE event format in real-time using streamOpenAIToClaude.
 func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg *config.Config) error {
 	// Track timing for simple log
 	startTime := time.Now()
@@ -213,12 +230,7 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg 
 
 		// OpenRouter-specific headers for better rate limits
 		if cfg.DetectProvider() == config.ProviderOpenRouter {
-			if cfg.OpenRouterAppURL != "" {
-				httpReq.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
-			}
-			if cfg.OpenRouterAppName != "" {
-				httpReq.Header.Set("X-Title", cfg.OpenRouterAppName)
-			}
+			addOpenRouterHeaders(httpReq, cfg)
 		}
 
 		client := &http.Client{
@@ -234,7 +246,7 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg 
 			writeSSEError(w, fmt.Sprintf("request failed: %v", err))
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if cfg.Debug {
 			fmt.Printf("[DEBUG] StreamWriter: Got response with status %d\n", resp.StatusCode)
@@ -274,8 +286,20 @@ type ToolCallState struct {
 	Started     bool   // Flag if content_block_start was sent
 }
 
-// streamOpenAIToClaude converts OpenAI SSE stream to Claude SSE format
-// This implementation matches the Python version line-by-line
+// streamOpenAIToClaude converts OpenAI streaming responses to Claude's SSE event format.
+//
+// It processes the OpenAI SSE stream chunk-by-chunk, generating the proper sequence of
+// Claude events: message_start, content_block_start, content_block_delta, content_block_stop,
+// message_delta, and message_stop.
+//
+// Handles:
+//   - Thinking blocks from reasoning models (OpenRouter's reasoning_details, OpenAI's reasoning_content)
+//   - Text content deltas
+//   - Tool call deltas (accumulates JSON arguments across chunks)
+//   - Token usage tracking and throughput calculation for simple log mode
+//
+// The function maintains state to track content block indices, tool call accumulation,
+// and ensures proper event ordering for Claude Code compatibility.
 func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel string, cfg *config.Config, startTime time.Time) {
 	if cfg.Debug {
 		fmt.Printf("[DEBUG] streamOpenAIToClaude: Starting conversion\n")
@@ -334,7 +358,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		"type": "ping",
 	})
 
-	w.Flush()
+	_ = w.Flush()
 
 	// Process streaming chunks (matches Python lines 111-210)
 	for scanner.Scan() {
@@ -480,7 +504,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 									},
 								})
 								thinkingBlockStarted = true
-								w.Flush()
+								_ = w.Flush()
 							}
 
 							// Send thinking block delta
@@ -493,7 +517,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 								},
 							})
 							thinkingBlockHasContent = true
-							w.Flush()
+							_ = w.Flush()
 						}
 					}
 				}
@@ -513,7 +537,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					},
 				})
 				thinkingBlockStarted = true
-				w.Flush()
+				_ = w.Flush()
 			}
 
 			// Send thinking block delta
@@ -526,7 +550,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				},
 			})
 			thinkingBlockHasContent = true
-			w.Flush()
+			_ = w.Flush()
 		}
 
 		// Handle text delta (matches Python lines 146-147)
@@ -542,7 +566,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					},
 				})
 				textBlockStarted = true
-				w.Flush()
+				_ = w.Flush()
 			}
 
 			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
@@ -553,7 +577,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					"text": content,
 				},
 			})
-			w.Flush()
+			_ = w.Flush()
 		}
 
 		// Handle tool call deltas (matches Python lines 149-198)
@@ -620,7 +644,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 									"input": map[string]interface{}{},
 								},
 							})
-							w.Flush()
+							_ = w.Flush()
 						}
 
 						// Handle function arguments (matches Python lines 186-198)
@@ -646,7 +670,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 												"partial_json": toolCall.ArgsBuffer,
 											},
 										})
-										w.Flush()
+										_ = w.Flush()
 										toolCall.JSONSent = true
 									}
 								}
@@ -661,13 +685,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		// Handle finish reason (matches Python lines 200-210)
 		// NOTE: Don't break here - with stream_options.include_usage, OpenAI sends usage in a chunk AFTER finish_reason
 		if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
-			if finishReason == "length" {
+			switch finishReason {
+			case "length":
 				finalStopReason = "max_tokens"
-			} else if finishReason == "tool_calls" || finishReason == "function_call" {
+			case "tool_calls", "function_call":
 				finalStopReason = "tool_use"
-			} else if finishReason == "stop" {
+			case "stop":
 				finalStopReason = "end_turn"
-			} else {
+			default:
 				finalStopReason = "end_turn"
 			}
 			// Continue processing to capture usage chunk (don't break)
@@ -682,7 +707,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			"type":  "content_block_stop",
 			"index": textBlockIndex,
 		})
-		w.Flush()
+		_ = w.Flush()
 	}
 
 	// Send content_block_stop for each tool call (matches Python lines 228-230)
@@ -693,7 +718,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				"type":  "content_block_stop",
 				"index": toolData.ClaudeIndex,
 			})
-			w.Flush()
+			_ = w.Flush()
 		}
 	}
 
@@ -703,7 +728,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			"type":  "content_block_stop",
 			"index": thinkingBlockIndex,
 		})
-		w.Flush()
+		_ = w.Flush()
 	}
 
 	// Debug: Check if usage data was received
@@ -730,13 +755,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		},
 		"usage": usageData,
 	})
-	w.Flush()
+	_ = w.Flush()
 
 	// Send message_stop (matches Python line 234)
 	writeSSEEvent(w, "message_stop", map[string]interface{}{
 		"type": "message_stop",
 	})
-	w.Flush()
+	_ = w.Flush()
 
 	// Simple log: one-line summary
 	if cfg.SimpleLog {
@@ -787,8 +812,8 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 // writeSSEEvent writes a Server-Sent Event
 func writeSSEEvent(w *bufio.Writer, event string, data interface{}) {
 	dataJSON, _ := json.Marshal(data)
-	fmt.Fprintf(w, "event: %s\n", event)
-	fmt.Fprintf(w, "data: %s\n\n", string(dataJSON))
+	_, _ = fmt.Fprintf(w, "event: %s\n", event)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", string(dataJSON))
 }
 
 // writeSSEError writes an error event
@@ -800,7 +825,7 @@ func writeSSEError(w *bufio.Writer, message string) {
 			"message": message,
 		},
 	})
-	w.Flush()
+	_ = w.Flush()
 }
 
 // callOpenAI makes an HTTP request to the OpenAI API
@@ -830,12 +855,7 @@ func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIRe
 
 	// OpenRouter-specific headers for better rate limits
 	if cfg.DetectProvider() == config.ProviderOpenRouter {
-		if cfg.OpenRouterAppURL != "" {
-			httpReq.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
-		}
-		if cfg.OpenRouterAppName != "" {
-			httpReq.Header.Set("X-Title", cfg.OpenRouterAppName)
-		}
+		addOpenRouterHeaders(httpReq, cfg)
 	}
 
 	// Create HTTP client with timeout
@@ -848,7 +868,7 @@ func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIRe
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)

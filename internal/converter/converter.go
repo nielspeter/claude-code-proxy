@@ -1,3 +1,8 @@
+// Package converter handles bidirectional conversion between Claude and OpenAI API formats.
+//
+// It provides functions to convert Claude API requests to OpenAI-compatible format and
+// OpenAI responses back to Claude format. This includes mapping models, converting message
+// structures, handling tool calls, and extracting thinking blocks from reasoning responses.
 package converter
 
 import (
@@ -20,7 +25,9 @@ const (
 	DefaultHaikuModel  = "gpt-5-mini"
 )
 
-// extractSystemText extracts system text from either string or array format
+// extractSystemText extracts system text from Claude's flexible system parameter.
+// Claude supports both string format ("system": "text") and array format with content blocks.
+// This function normalizes both formats to a single string for OpenAI compatibility.
 func extractSystemText(system interface{}) string {
 	if system == nil {
 		return ""
@@ -100,7 +107,9 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 
 		switch provider {
 		case config.ProviderOpenRouter:
-			// OpenRouter-specific format
+			// OpenRouter needs reasoning blocks and usage tracking enabled
+			// - reasoning.enabled: Enables thinking blocks in response
+			// - usage.include: Tracks token usage even in streaming mode
 			openaiReq.StreamOptions = map[string]interface{}{
 				"include_usage": true,
 			}
@@ -112,19 +121,17 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 			}
 
 		case config.ProviderOpenAI:
-			// OpenAI supports stream_options and reasoning (GPT-5 models)
+			// OpenAI GPT-5 models support reasoning_effort parameter
+			// This controls how much time the model spends thinking before responding
 			openaiReq.StreamOptions = map[string]interface{}{
 				"include_usage": true,
 			}
-			// GPT-5 models: Use Chat Completions reasoning_effort parameter
 			openaiReq.ReasoningEffort = "medium" // minimal | low | medium | high
 
 		case config.ProviderOllama:
-			// Force Ollama to use tools when they're provided
-			// Check claudeReq.Tools since openaiReq.Tools hasn't been set yet
+			// Ollama needs explicit tool_choice when tools are present
+			// Without this, Ollama models may not naturally choose to use tools
 			if len(claudeReq.Tools) > 0 {
-				// Set tool_choice to "required" to force tool usage
-				// This helps with models that don't naturally choose to use tools
 				openaiReq.ToolChoice = "required"
 			}
 		}
@@ -153,7 +160,10 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 	return openaiReq, nil
 }
 
-// mapModel implements pattern-based model routing
+// mapModel maps Claude model names to provider-specific models using pattern matching.
+// It routes haiku/sonnet/opus tiers to appropriate models (gpt-5-mini, gpt-5, etc.)
+// and allows environment variable overrides for routing to alternative providers like
+// Grok, Gemini, or DeepSeek. Non-Claude model names are passed through unchanged.
 func mapModel(claudeModel string, cfg *config.Config) string {
 	modelLower := strings.ToLower(claudeModel)
 
@@ -185,7 +195,15 @@ func mapModel(claudeModel string, cfg *config.Config) string {
 	return claudeModel
 }
 
-// convertMessages converts Claude messages to OpenAI format
+// convertMessages converts Claude messages to OpenAI format.
+//
+// Handles three content types:
+//   - String content: Simple text messages
+//   - Array content with blocks: text, tool_use (mapped to tool_calls), and tool_result (mapped to role=tool)
+//   - Tool results: Special handling to create OpenAI tool response messages
+//
+// The function maintains the conversation flow while translating Claude's content block
+// structure to OpenAI's message format, ensuring tool call IDs are preserved for correlation.
 func convertMessages(claudeMessages []models.ClaudeMessage, system string) []models.OpenAIMessage {
 	openaiMessages := []models.OpenAIMessage{}
 
@@ -314,7 +332,8 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 	return openaiMessages
 }
 
-// convertTools converts Claude tools to OpenAI format
+// convertTools converts Claude tool definitions to OpenAI function calling format.
+// Maps tool name, description, and input_schema to OpenAI's function structure.
 func convertTools(claudeTools []models.Tool) []models.OpenAITool {
 	openaiTools := make([]models.OpenAITool, len(claudeTools))
 
