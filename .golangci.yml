@@ -6,12 +6,10 @@ run:
   tests: false  # Don't analyze test files
 
 linters:
-  enabled:
+  default: none  # Start with no linters, only enable specific ones
+  enable:
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
-
-issues:
-  exclude-use-default: true
