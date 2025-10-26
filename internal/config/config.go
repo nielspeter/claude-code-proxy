@@ -1,3 +1,8 @@
+// Package config handles configuration loading from environment variables and .env files.
+//
+// It supports multiple config file locations (./.env, ~/.claude/proxy.env, ~/.claude-code-proxy)
+// and detects the provider type (OpenRouter, OpenAI, Ollama) based on the OPENAI_BASE_URL.
+// The package also handles model overrides for routing Claude model names to alternative providers.
 package config
 
 import (

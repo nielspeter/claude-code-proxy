@@ -1,3 +1,8 @@
+// Package daemon handles background process management for the proxy server.
+//
+// It manages PID file creation/deletion, process health checks, and provides functions
+// to start, stop, and check the status of the proxy daemon. The daemon runs in the
+// background and can be controlled via the CLI (start, stop, status commands).
 package daemon
 
 import (
@@ -18,7 +23,7 @@ func IsRunning() bool {
 	// Try health check first
 	resp, err := http.Get(healthURL)
 	if err == nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return resp.StatusCode == 200
 	}
 
@@ -100,7 +105,7 @@ func readPID() (int, error) {
 }
 
 func cleanupPID() {
-	os.Remove(pidFile)
+	_ = os.Remove(pidFile) // Ignore error - cleanup is best-effort
 }
 
 func isProcessRunning() bool {
