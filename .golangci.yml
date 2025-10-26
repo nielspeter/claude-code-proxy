@@ -1,8 +1,9 @@
-version: "2"
-
 run:
   timeout: 5m
-  tests: true
+  tests: false
+  skip-dirs:
+    - vendor
+    - third_party
 
 linters:
   enable:
@@ -12,7 +13,15 @@ linters:
     - staticcheck
     - unused
 
+linters-settings:
+  errcheck:
+    check-blank: false
+
 issues:
-  # Exclude test files from linting
-  exclude-dirs:
-    - _test.go
+  exclude-use-default: true
+  exclude-rules:
+    # Exclude error checks in test files
+    - path: _test\.go
+      linters:
+        - errcheck
+        - staticcheck
