@@ -47,24 +47,60 @@ providers/
 └── ollama.go            # Ollama implementation
 ```
 
-**Provider Interface**:
+**Provider Interface** (Detailed Specification):
 ```go
 type Provider interface {
-    Name() string
-    DetectFromURL(baseURL string) bool
-    PrepareRequest(req *OpenAIRequest) error
-    ParseResponse(resp *OpenAIResponse) error
-    SupportsStreaming() bool
-    SupportsReasoning() bool
-    StreamingFormat() string  // "openai", "openrouter", etc
+    // Configuration - static provider information
+    Name() string  // "openrouter", "openai", "ollama"
+    DetectFromURL(baseURL string) bool  // Does this URL match our provider?
+
+    // Capabilities - what features does this provider support
+    SupportsStreaming() bool    // Does provider support streaming responses?
+    SupportsReasoning() bool    // Does provider support reasoning/thinking?
+    StreamingFormat() string    // "openai" | "openrouter" | "ollama"
+
+    // Request Handling - modify request before sending to provider
+    // NOTE: Message/tool conversion happens in converter/ (generic)
+    // NOTE: Model routing happens in converter/ (generic)
+    // Provider only handles provider-specific request details
+
+    RequestHeaders(cfg *config.Config) map[string]string
+        // Return map of headers to add (auth, app name, etc)
+        // Example: OpenRouter adds X-Title header for app tracking
+
+    RequestParameters(cfg *config.Config) map[string]interface{}
+        // Return provider-specific parameters to add to request body
+        // Example: OpenRouter adds reasoning:{enabled:true}
+        // Example: OpenAI adds reasoning_effort:"medium"
+        // Example: Ollama adds tool_choice:"required"
+
+    // Response Handling - extract provider-specific data from response
+    // NOTE: Message/tool conversion happens in converter/ (generic)
+    // NOTE: Thinking block extraction happens in converter/ (generic)
+    // Provider only handles provider-specific response details
+
+    ExtractTokens(resp *OpenAIResponse) *Usage
+        // Extract token counts (providers format differently)
+        // Returns InputTokens, OutputTokens
+
+    HandleStreamingChunk(chunk []byte) (interface{}, error)
+        // Parse provider-specific streaming format
+        // Ollama might be different than OpenAI standard
+        // Return parsed chunk or error
 }
 ```
 
+**Key Design Decisions**:
+1. **Converter is Generic**: Message conversion, tool conversion, thinking extraction all stay in converter/ (provider-agnostic)
+2. **Provider is Specific**: Only request headers, parameters, response parsing
+3. **Clean Separation**: Converter doesn't know about providers. Providers don't modify messages/tools
+4. **No Circular Logic**: Handlers call provider methods, NOT vice versa
+
 **Benefits**:
-- Add new provider by creating single file implementing interface
-- No changes to main handlers needed
-- Each provider can have custom request/response logic
-- Reasoning, tool_choice, stream options all provider-specific
+- Add new provider by implementing 5-6 methods
+- No changes to converter (message/tool logic)
+- No changes to handlers (detection/calling logic stays same)
+- Easy to test - mock provider with test_provider.go
 
 ### 2. Split Converter into Logical Modules (Refactor: `converter/`)
 
@@ -95,52 +131,74 @@ converter/
 - Easier to test each converter independently
 - Better code organization and readability
 
-### 3. Split Handlers into Logical Modules (Refactor: `server/handlers/`)
+### 3. Extract Middleware (New: `server/middleware/`)
+
+**Purpose**: Extract reusable middleware from handlers into separate modules
+
+**Structure**:
+```
+middleware/
+├── auth.go              # API key validation middleware
+├── logging.go           # Debug & simple logging middleware
+└── errors.go            # Error response formatting
+```
+
+**Responsibilities**:
+- `auth.go`: Validate x-api-key header against configured key
+- `logging.go`: Log requests/responses in debug mode or simple log mode
+- `errors.go`: Format error responses consistently
+
+**Benefits**:
+- Reusable across all endpoints
+- Keeps handlers clean
+- Easier to test in isolation
+- Follows middleware pattern
+
+### 4. Split Handlers into Logical Modules (Refactor: `server/handlers/`)
 
 **Purpose**: Break down 878-line handlers.go into focused endpoints
 
 **Structure**:
 ```
 handlers/
-├── messages.go          # Main /v1/messages endpoint
+├── messages.go          # Main /v1/messages endpoint (uses provider, converter, streaming)
 ├── tokens.go            # /v1/messages (tokens) endpoint
-├── health.go            # /health endpoint
-└── middleware.go        # API key validation, debug logging
+└── health.go            # /health endpoint
 ```
 
 **Responsibilities**:
-- `messages.go`: Request parsing, validation, provider selection, response handling
-- `tokens.go`: Token counting endpoint (separate concern)
-- `health.go`: Health check endpoint
-- `middleware.go`: API key validation, request/response logging
+- `messages.go`: Request parsing, provider selection, converter call, response/streaming
+- `tokens.go`: Token counting endpoint (parse request, call provider, return usage)
+- `health.go`: Health check endpoint (no logic needed)
 
 **Benefits**:
-- Each handler is small and focused
+- Each handler is small and focused (<100 lines)
 - Easier to find and modify specific endpoints
 - Streaming logic extracted separately (see below)
+- Middleware handles cross-cutting concerns
 
-### 4. Extract Streaming to Separate Package (New: `server/streaming/`)
+### 5. Extract Streaming to Separate Package (New: `server/streaming/`)
 
 **Purpose**: Isolate complex streaming logic from request handlers
 
 **Structure**:
 ```
 streaming/
-├── adapter.go           # Generic streaming converter
-├── sse_writer.go        # SSE event formatting
-└── parser.go            # Parse provider-specific streaming formats
+├── converter.go         # Orchestrates OpenAI chunks → Claude SSE events
+└── sse.go              # SSE event formatting utilities
 ```
 
 **Responsibilities**:
-- `adapter.go`: Orchestrates SSE event generation from provider chunks
-- `sse_writer.go`: Format Claude SSE events (message_start, content_block_start, etc)
-- `parser.go`: Parse OpenAI SSE format → Claude format
+- `converter.go`: Main orchestrator that parses OpenAI SSE chunks and generates Claude SSE events
+- `sse.go`: Low-level utilities for formatting/writing SSE events (message_start, content_block_delta, etc)
+
+**Important**: Provider-specific chunk parsing stays in `providers/{openrouter,openai,ollama}.go` via the `HandleStreamingChunk()` interface method
 
 **Benefits**:
 - Streaming logic isolated from request handling
-- Reusable SSE utilities
-- Easier to test streaming without full HTTP context
-- Provider-specific streaming formats handled in provider implementations
+- Reusable SSE formatting utilities
+- Easier to test without HTTP context
+- Providers handle their own chunk parsing
 
 ### 5. Request/Response Pipeline (Existing, no changes needed)
 
@@ -161,6 +219,40 @@ converter/{messages,tools,reasoning}.go (response conversion)
 streaming/ or handlers/ (format output)
     ↓
 Claude Response
+```
+
+## Architecture Rules & Constraints
+
+### Import Rules (Enforce These to Prevent Circular Dependencies)
+
+```
+✅ ALLOWED IMPORTS:
+- handlers/ → config, converter, providers, streaming, middleware
+- converter/ → config only (NOT providers, NOT handlers)
+- providers/ → config only (NOT converter, NOT handlers, NOT streaming)
+- streaming/ → config, converter (NOT providers, NOT handlers)
+- middleware/ → config only (NOT anything else)
+
+❌ FORBIDDEN IMPORTS:
+- converter imports providers (would create circular dependency)
+- providers imports converter (provider methods are simple, don't convert)
+- handlers imports streaming directly (use it via handlers, not external)
+- middleware imports handlers (wrong direction)
+- Any package imports cmd/
+
+⚠️ CRITICAL: If you need to import something not in the allowed list, you've
+probably broken separation of concerns. Refactor instead of adding imports.
+```
+
+### Responsibility Boundaries
+
+```
+converter/: Handles FORMAT conversion (Claude ↔ OpenAI, not provider logic)
+providers/: Handles PROVIDER QUIRKS (headers, parameters, token extraction)
+handlers/: Handles HTTP REQUESTS (parsing, routing, error handling)
+streaming/: Handles SSE OUTPUT (event generation, chunk conversion)
+middleware/: Handles CROSS-CUTTING CONCERNS (auth, logging)
+config/:   Handles ENVIRONMENT CONFIGURATION (no logic)
 ```
 
 ## File Organization After Refactoring
@@ -214,18 +306,25 @@ internal/
 ├── server/                 (REFACTORED)
 │   ├── server.go           (no change)
 │   ├── middleware/         (NEW)
-│   │   ├── auth.go         (API key validation)
-│   │   └── logging.go      (debug/simple logging)
+│   │   ├── auth.go         (NEW: API key validation)
+│   │   ├── auth_test.go    (NEW)
+│   │   ├── logging.go      (NEW: debug/simple logging)
+│   │   ├── logging_test.go (NEW)
+│   │   ├── errors.go       (NEW: error response formatting)
+│   │   └── errors_test.go  (NEW)
 │   ├── handlers/           (NEW)
 │   │   ├── messages.go     (NEW: /v1/messages handler)
+│   │   ├── messages_test.go (NEW)
 │   │   ├── tokens.go       (NEW: /v1/messages?tokens endpoint)
+│   │   ├── tokens_test.go  (NEW)
 │   │   ├── health.go       (NEW: /health endpoint)
-│   │   └── handlers_test.go (updated)
+│   │   └── health_test.go  (NEW)
 │   ├── streaming/          (NEW)
-│   │   ├── adapter.go      (NEW: SSE conversion)
-│   │   ├── sse_writer.go   (NEW: SSE formatting)
-│   │   ├── parser.go       (NEW: response parsing)
-│   │   └── streaming_test.go (NEW)
+│   │   ├── converter.go    (NEW: SSE conversion orchestrator)
+│   │   ├── converter_test.go (NEW)
+│   │   ├── sse.go          (NEW: SSE formatting utilities)
+│   │   ├── sse_test.go     (NEW)
+│   │   └── streaming_test.go (NEW: integration tests)
 │   └── server_test.go      (updated)
 ├── daemon/                 (no change)
 │   ├── daemon.go
@@ -294,6 +393,28 @@ registry.Register("anthropic", &AnthropicProvider{})
 
 ## Testing Strategy
 
+### Mocking Approach
+
+**Key Testing Principle**: Don't test HTTP calls or file I/O. Mock them.
+
+```go
+// providers/test_provider.go (use in all handler tests)
+type MockProvider struct {
+    name              string
+    supportsStreaming bool
+    supportsReasoning bool
+}
+
+func (p *MockProvider) Name() string { return p.name }
+func (p *MockProvider) DetectFromURL(url string) bool { return true }
+func (p *MockProvider) SupportsStreaming() bool { return p.supportsStreaming }
+func (p *MockProvider) SupportsReasoning() bool { return p.supportsReasoning }
+func (p *MockProvider) RequestHeaders(cfg *config.Config) map[string]string { return map[string]string{} }
+func (p *MockProvider) RequestParameters(cfg *config.Config) map[string]interface{} { return map[string]interface{}{} }
+func (p *MockProvider) ExtractTokens(resp *OpenAIResponse) *Usage { return &Usage{} }
+func (p *MockProvider) HandleStreamingChunk(chunk []byte) (interface{}, error) { return nil, nil }
+```
+
 ### Test Files Before
 ```
 converter_test.go         (all converter tests)
@@ -350,54 +471,132 @@ Each refactoring step will verify:
 ### Phase 1: Core Refactoring (This PR)
 **Goal**: Split large files into focused modules, establish provider interface
 
-Tasks:
-1. ✅ Split `converter.go` into `{models, messages, tools, reasoning}.go`
-2. ✅ Create provider interface stub in `providers/provider.go`
-3. ✅ Split `handlers.go` into `handlers/{messages, tokens, health}.go`
-4. ✅ Create `streaming/` package with SSE utilities
-5. ✅ Create `middleware/` package for auth/logging
-6. ✅ Update all imports
-7. ✅ Run full test suite - verify coverage maintained
-8. ✅ Commit with message documenting refactoring
+**Timeline**: 4-6 hours (with thorough testing at each step)
+
+**Detailed Tasks** (In This Order):
+1. **Create Provider Interface** (30 min)
+   - Create `providers/provider.go` with detailed interface
+   - Add detailed comments on each method
+   - Create `providers/registry.go` stub (no implementations yet)
+   - Create `providers/test_provider.go` for mocking
+   - Tests: `providers/provider_test.go` (interface contract tests)
+
+2. **Extract Middleware** (45 min)
+   - Create `middleware/auth.go` (API key validation)
+   - Create `middleware/logging.go` (debug/simple logging)
+   - Create `middleware/errors.go` (error formatting)
+   - Move logic from current handlers.go
+   - Tests: `middleware/*_test.go` for each module
+   - **Run tests**: `go test ./internal/server/middleware`
+
+3. **Split Converter** (60 min)
+   - Create `converter/models.go` (model routing + constants)
+   - Create `converter/messages.go` (message conversion)
+   - Create `converter/tools.go` (tool conversion)
+   - Create `converter/reasoning.go` (thinking block extraction)
+   - Update `converter/converter.go` as orchestrator
+   - Move tests to corresponding `*_test.go` files
+   - **Run tests**: `go test ./internal/converter`
+   - **Verify coverage**: Should be >= 82%
+
+4. **Split Handlers** (60 min)
+   - Create `handlers/messages.go` (main /v1/messages endpoint)
+   - Create `handlers/tokens.go` (/v1/messages?tokens endpoint)
+   - Create `handlers/health.go` (/health endpoint)
+   - Remove original logic from handlers.go
+   - Update to use middleware and provider interface
+   - Tests: `handlers/*_test.go` for each handler (use MockProvider)
+   - **Run tests**: `go test ./internal/server/handlers`
+
+5. **Extract Streaming** (45 min)
+   - Create `streaming/converter.go` (orchestrator)
+   - Create `streaming/sse.go` (utilities)
+   - Move streaming logic from handlers.go
+   - Tests: `streaming/*_test.go`
+   - **Run tests**: `go test ./internal/server/streaming`
+
+6. **Final Verification** (30 min)
+   - Update all imports across packages
+   - Verify import rules are followed
+   - **Run full test suite**: `go test ./...`
+   - **Check coverage**: `go test -cover ./...`
+   - **Lint**: `golangci-lint run`
+   - **Build**: `go build ./...`
 
 **Deliverables**:
-- Modular architecture with single-responsibility files
-- All tests passing
-- Coverage maintained at current levels
-- PR with detailed commit messages
+- Modular architecture with single-responsibility files (all < 200 lines)
+- Provider interface ready for Phase 2
+- All tests passing (0 regressions)
+- Coverage maintained/improved (converter: 82%+, config: 97%+, daemon: 59%+)
+- Import rules followed (no circular dependencies)
+- PR with detailed commit messages explaining each refactoring step
 
 ### Phase 2: Provider Abstraction (Next PR)
 **Goal**: Implement provider interface for existing providers, remove provider-specific code from generic modules
 
-Tasks:
-1. Implement `providers/openrouter.go` with OpenRouter-specific logic
-2. Implement `providers/openai.go` with OpenAI-specific logic
-3. Implement `providers/ollama.go` with Ollama-specific logic
-4. Create `providers/registry.go` to detect and register providers
-5. Update handlers to use provider registry instead of direct provider checks
-6. Move provider-specific request/response logic into provider implementations
-7. Remove provider-specific code from `converter/`
-8. Update tests for provider implementations
-9. Integration tests with all three providers
+**Timeline**: 2-3 hours
+
+**Detailed Tasks**:
+1. Implement `providers/openrouter.go`
+   - RequestHeaders: Add X-Title (app name), x-title (app url)
+   - RequestParameters: Add reasoning:{enabled:true}, usage:{include:true}
+   - ExtractTokens: Extract from response
+   - HandleStreamingChunk: Parse OpenRouter SSE format
+   - Tests: `providers/openrouter_test.go`
+
+2. Implement `providers/openai.go`
+   - RequestHeaders: Add standard auth
+   - RequestParameters: Add reasoning_effort:"medium"
+   - ExtractTokens: Extract from standard format
+   - HandleStreamingChunk: Parse standard OpenAI format
+   - Tests: `providers/openai_test.go`
+
+3. Implement `providers/ollama.go`
+   - RequestHeaders: No auth needed (local)
+   - RequestParameters: Add tool_choice:"required" when tools present
+   - ExtractTokens: Handle Ollama format (may be different)
+   - HandleStreamingChunk: Parse Ollama SSE format
+   - Tests: `providers/ollama_test.go`
+
+4. Update `providers/registry.go`
+   - Implement detection logic (call each provider's DetectFromURL)
+   - Register implementations
+   - Return appropriate provider based on baseURL
+
+5. Update handlers
+   - Replace hardcoded provider checks with provider.RequestHeaders/Parameters
+   - Replace response parsing with provider.ExtractTokens
+   - Tests should still pass (using MockProvider)
+
+6. Remove provider-specific code from `converter/`
+   - No more openrouter-specific reasoning handling in converter
+   - No more ollama-specific tool_choice in converter
+   - Converter stays generic
+
+7. Integration tests
+   - Test full flow: Claude request → provider → conversion → response
+   - Test all three providers with MockProvider first
+   - **Run full test suite**: `go test ./...`
 
 **Deliverables**:
-- Provider-agnostic core modules
-- Clean provider implementations
-- Easy to add new providers
-- Full test coverage for each provider
+- Provider-agnostic core modules (converter, handlers, middleware)
+- Clean provider implementations (each is 100-150 lines)
+- Easy to add new providers (just implement interface)
+- Full test coverage (each provider tested separately)
 
-### Phase 3: Middleware & Utilities (Future PR)
-**Goal**: Extract middleware into separate modules
+### Phase 3: Provider Addition Example (Future PR - Anthropic Direct)
+**Goal**: Demonstrate that new providers can be added with single file
 
-Tasks:
-1. Create `middleware/auth.go` for API key validation
-2. Create `middleware/logging.go` for debug/simple logging
-3. Create `middleware/error_handler.go` for error responses
-4. Update tests
+**Task**: Add Anthropic API Direct support
+- Create `providers/anthropic.go` (implement interface)
+- Create `providers/anthropic_test.go`
+- Update `providers/registry.go` to register
+- **Result**: 0 changes to handlers, converter, middleware, streaming
+- Demonstrates extensibility of architecture
 
 **Deliverables**:
-- Reusable middleware components
-- Cleaner request handler code
+- Proven provider extensibility
+- Example of adding new provider (for future contributors)
 
 ## Key Design Decisions
 
