@@ -1,27 +1,17 @@
+# golangci-lint v2 configuration
+version: "2"
+
 run:
   timeout: 5m
-  tests: false
-  skip-dirs:
-    - vendor
-    - third_party
+  tests: false  # Don't analyze test files
 
 linters:
-  enable:
+  enabled:
     - errcheck
     - govet
     - ineffassign
     - staticcheck
     - unused
 
-linters-settings:
-  errcheck:
-    check-blank: false
-
 issues:
   exclude-use-default: true
-  exclude-rules:
-    # Exclude error checks in test files
-    - path: _test\.go
-      linters:
-        - errcheck
-        - staticcheck
