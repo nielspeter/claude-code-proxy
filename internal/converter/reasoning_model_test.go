@@ -26,11 +26,15 @@ func TestIsReasoningModel(t *testing.T) {
 		{"o1", "o1", true},
 		{"o1-preview", "o1-preview", true},
 		{"o1-mini", "o1-mini", true},
+		{"o2", "o2", true},
+		{"o2-preview", "o2-preview", true},
+		{"o2-mini", "o2-mini", true},
 		{"o3", "o3", true},
 		{"o3-mini", "o3-mini", true},
 		{"o4", "o4", true},
 		{"o4-turbo", "o4-turbo", true},
 		{"azure/o1", "azure/o1", true},
+		{"azure/o2", "azure/o2", true},
 		{"openai/o3", "openai/o3", true},
 
 		// GPT-4 series (NOT reasoning models)
@@ -70,11 +74,11 @@ func TestIsReasoningModel(t *testing.T) {
 
 func TestReasoningModelTokenParameter(t *testing.T) {
 	tests := []struct {
-		name                 string
-		model                string
-		maxTokens            int
-		expectMaxTokens      int
-		expectMaxCompletion  int
+		name                string
+		model               string
+		maxTokens           int
+		expectMaxTokens     int
+		expectMaxCompletion int
 	}{
 		{
 			name:                "gpt-5 uses max_completion_tokens",
@@ -89,6 +93,13 @@ func TestReasoningModelTokenParameter(t *testing.T) {
 			maxTokens:           200,
 			expectMaxTokens:     0,
 			expectMaxCompletion: 200,
+		},
+		{
+			name:                "o2 uses max_completion_tokens",
+			model:               "o2",
+			maxTokens:           150,
+			expectMaxTokens:     0,
+			expectMaxCompletion: 150,
 		},
 		{
 			name:                "azure/o3 uses max_completion_tokens",

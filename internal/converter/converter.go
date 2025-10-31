@@ -26,9 +26,11 @@ const (
 )
 
 // isReasoningModel detects if a model uses reasoning/extended thinking capabilities.
-// Reasoning models require max_completion_tokens instead of max_tokens.
+// Per OpenAI API specs, reasoning models require max_completion_tokens instead of max_tokens.
+// See: https://platform.openai.com/docs/api-reference/chat/create#chat-create-max_completion_tokens
+//
 // This includes:
-//   - OpenAI o-series: o1, o3, o4 (reasoning models)
+//   - OpenAI o-series: o1, o2, o3, o4 (reasoning models)
 //   - OpenAI GPT-5 series: gpt-5, gpt-5-mini, etc.
 //   - Azure variants: azure/o1, azure/gpt-5, etc.
 func isReasoningModel(modelName string) bool {
@@ -38,16 +40,18 @@ func isReasoningModel(modelName string) bool {
 	model = strings.TrimPrefix(model, "azure/")
 	model = strings.TrimPrefix(model, "openai/")
 
-	// Check for o-series reasoning models (o1, o3, o4, etc.)
-	// Matches: o1, o1-preview, o3, o3-mini, o4, etc.
+	// Check for o-series reasoning models (o1, o2, o3, o4, etc.)
+	// Matches: o1, o1-preview, o2, o2-mini, o3, o3-mini, o4, etc.
 	if strings.HasPrefix(model, "o1") ||
-	   strings.HasPrefix(model, "o3") ||
-	   strings.HasPrefix(model, "o4") {
+		strings.HasPrefix(model, "o2") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4") {
 		return true
 	}
 
 	// Check for GPT-5 series (gpt-5, gpt-5-mini, gpt-5-turbo, etc.)
-	if strings.HasPrefix(model, "gpt-5") || strings.Contains(model, "/gpt-5") {
+	// Prefixes are already stripped above, so simple prefix check suffices
+	if strings.HasPrefix(model, "gpt-5") {
 		return true
 	}
 
