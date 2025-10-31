@@ -25,6 +25,35 @@ const (
 	DefaultHaikuModel  = "gpt-5-mini"
 )
 
+// isReasoningModel detects if a model uses reasoning/extended thinking capabilities.
+// Reasoning models require max_completion_tokens instead of max_tokens.
+// This includes:
+//   - OpenAI o-series: o1, o3, o4 (reasoning models)
+//   - OpenAI GPT-5 series: gpt-5, gpt-5-mini, etc.
+//   - Azure variants: azure/o1, azure/gpt-5, etc.
+func isReasoningModel(modelName string) bool {
+	model := strings.ToLower(modelName)
+
+	// Remove provider prefixes for pattern matching
+	model = strings.TrimPrefix(model, "azure/")
+	model = strings.TrimPrefix(model, "openai/")
+
+	// Check for o-series reasoning models (o1, o3, o4, etc.)
+	// Matches: o1, o1-preview, o3, o3-mini, o4, etc.
+	if strings.HasPrefix(model, "o1") ||
+	   strings.HasPrefix(model, "o3") ||
+	   strings.HasPrefix(model, "o4") {
+		return true
+	}
+
+	// Check for GPT-5 series (gpt-5, gpt-5-mini, gpt-5-turbo, etc.)
+	if strings.HasPrefix(model, "gpt-5") || strings.Contains(model, "/gpt-5") {
+		return true
+	}
+
+	return false
+}
+
 // extractSystemText extracts system text from Claude's flexible system parameter.
 // Claude supports both string format ("system": "text") and array format with content blocks.
 // This function normalizes both formats to a single string for OpenAI compatibility.
@@ -139,8 +168,9 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 
 	// Set token limit
 	if claudeReq.MaxTokens > 0 {
-		// Use max_completion_tokens for newer models
-		if strings.HasPrefix(openaiModel, "gpt-5") {
+		// Reasoning models (o1, o3, o4, gpt-5) require max_completion_tokens
+		// instead of the legacy max_tokens parameter
+		if isReasoningModel(openaiModel) {
 			openaiReq.MaxCompletionTokens = claudeReq.MaxTokens
 		} else {
 			openaiReq.MaxTokens = claudeReq.MaxTokens
