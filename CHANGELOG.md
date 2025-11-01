@@ -7,13 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2025-11-01
+
 ### Added
-- Comprehensive unit tests for dynamic reasoning model detection
-- Test coverage for `IsReasoningModel()` and `FetchReasoningModels()` functions
-- Mock HTTP server tests for OpenRouter API integration
+- **Complete CHANGELOG.md** following Keep a Changelog format
+  - Full history for v1.0.0, v1.1.0, and v1.2.0
+  - Categorized changes (Added, Changed, Fixed, etc.)
+  - Upgrade guides and release notes
+- **Release documentation system**
+  - `.github/RELEASE_TEMPLATE.md` with step-by-step checklist
+  - `.github/RELEASE_WORKFLOW.md` with complete workflow guide
+  - Conventional commits guidelines
+  - Semantic versioning strategy
+- **Professional README badges**
+  - Version badge (links to latest release)
+  - Go version badge
+  - Build status badge
+  - License badge
+  - Open issues badge
+- **Comprehensive unit tests** for dynamic reasoning model detection
+  - 36 new test cases covering hardcoded fallback patterns
+  - OpenRouter API cache behavior tests
+  - Provider-specific detection tests
+  - Edge cases and error handling tests
+  - Mock HTTP server tests for OpenRouter API integration
 
 ### Changed
+- **Automated release workflow** now extracts release notes from CHANGELOG.md
+  - Falls back to auto-generated notes if no changelog section found
+  - Cleaner workflow logic with proper error handling
 - Updated reasoning model detection tests to use `cfg.IsReasoningModel()` method
+
+### Fixed
+- Linter error for unchecked `resp.Body.Close()` in `FetchReasoningModels()`
 
 ## [1.1.0] - 2025-10-31
 
