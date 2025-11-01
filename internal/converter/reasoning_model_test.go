@@ -8,6 +8,12 @@ import (
 )
 
 func TestIsReasoningModel(t *testing.T) {
+	// Create a config with OpenAI Direct (uses hardcoded pattern matching)
+	cfg := &config.Config{
+		OpenAIAPIKey:  "test-key",
+		OpenAIBaseURL: "https://api.openai.com/v1",
+	}
+
 	tests := []struct {
 		name     string
 		model    string
@@ -64,9 +70,9 @@ func TestIsReasoningModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isReasoningModel(tt.model)
+			result := cfg.IsReasoningModel(tt.model)
 			if result != tt.expected {
-				t.Errorf("isReasoningModel(%q) = %v, expected %v", tt.model, result, tt.expected)
+				t.Errorf("cfg.IsReasoningModel(%q) = %v, expected %v", tt.model, result, tt.expected)
 			}
 		})
 	}

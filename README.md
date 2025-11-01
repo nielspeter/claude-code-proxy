@@ -1,5 +1,11 @@
 # Claude Code Proxy (Go)
 
+[![Latest Release](https://img.shields.io/github/v/release/nielspeter/claude-code-proxy?label=version)](https://github.com/nielspeter/claude-code-proxy/releases/latest)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/nielspeter/claude-code-proxy)](https://go.dev/)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/nielspeter/claude-code-proxy/ci.yml?branch=main)](https://github.com/nielspeter/claude-code-proxy/actions)
+[![License](https://img.shields.io/github/license/nielspeter/claude-code-proxy)](LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/nielspeter/claude-code-proxy)](https://github.com/nielspeter/claude-code-proxy/issues)
+
 A lightweight HTTP proxy that enables Claude Code to work with OpenAI-compatible API providers including OpenRouter (200+ models), OpenAI Direct (GPT-5 reasoning), and Ollama (free local inference).
 
 > **⚠️ Early Stage / Beta Software**
