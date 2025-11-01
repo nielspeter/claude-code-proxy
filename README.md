@@ -331,6 +331,8 @@ golangci-lint run
 
 ## Testing
 
+### Unit Tests
+
 The project includes comprehensive unit tests:
 
 ```bash
@@ -343,6 +345,29 @@ go test -v ./internal/converter
 # Run with coverage
 go test -cover ./...
 ```
+
+### Manual Testing
+
+Test the proxy with Claude Code CLI:
+
+```bash
+# Start proxy in background
+./claude-code-proxy -s &
+
+# Test with different model tiers
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model opus -p "hi"
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "hi"
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model haiku -p "hi"
+
+# Check proxy logs
+./claude-code-proxy status
+tail -f /tmp/claude-code-proxy.log
+
+# Stop proxy
+./claude-code-proxy stop
+```
+
+See [CLAUDE.md](CLAUDE.md#manual-testing) for detailed testing instructions including tool calling, streaming, and provider-specific tests.
 
 ## How It Works
 

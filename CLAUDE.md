@@ -140,6 +140,118 @@ The test suite has two main categories:
 
 When adding new provider support, create tests in `provider_test.go` following the existing pattern.
 
+## Manual Testing
+
+To manually test the proxy with Claude Code CLI:
+
+### 1. Start the proxy in background
+
+```bash
+# Build first
+go build -o claude-code-proxy cmd/claude-code-proxy/main.go
+
+# Start in simple log mode (recommended for testing)
+./claude-code-proxy -s &
+
+# Or with debug logging
+./claude-code-proxy -d &
+
+# Check it's running
+./claude-code-proxy status
+```
+
+### 2. Test with different Claude model tiers
+
+The proxy routes Claude model names to your configured backend models:
+
+```bash
+# Test with Opus tier (routes to ANTHROPIC_DEFAULT_OPUS_MODEL or gpt-5)
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model opus -p "hi"
+
+# Test with Sonnet tier (routes to ANTHROPIC_DEFAULT_SONNET_MODEL or gpt-5)
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "hi"
+
+# Test with Haiku tier (routes to ANTHROPIC_DEFAULT_HAIKU_MODEL or gpt-5-mini)
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model haiku -p "hi"
+```
+
+### 3. Verify routing
+
+Check the proxy logs to see which backend model was used:
+
+```bash
+# Simple log mode shows:
+# [REQ] https://openrouter.ai/api/v1 model=openai/gpt-5 in=20 out=5 tok/s=25.3
+
+# Debug mode shows full request/response JSON
+tail -f /tmp/claude-code-proxy.log
+```
+
+### 4. Test tool calling
+
+```bash
+# Test with a prompt that triggers tool usage
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "list files in current directory"
+
+# Should see tool_calls in debug logs
+# Verify proper Claude tool_use → OpenAI tool_calls → Claude tool_result conversion
+```
+
+### 5. Test streaming and thinking blocks
+
+```bash
+# Test with reasoning model (should show thinking blocks)
+# Configure .env with: ANTHROPIC_DEFAULT_SONNET_MODEL=openai/gpt-5
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "solve: 2x + 5 = 15"
+
+# Should show thinking process in Claude Code UI
+# Verify reasoning_details → thinking block conversion in logs
+```
+
+### 6. Stop the proxy
+
+```bash
+./claude-code-proxy stop
+```
+
+### Testing Different Providers
+
+**OpenRouter:**
+```bash
+# .env or ~/.claude/proxy.env
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=sk-or-v1-...
+ANTHROPIC_DEFAULT_SONNET_MODEL=openai/gpt-5
+
+# Test
+./claude-code-proxy -s &
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "hi"
+```
+
+**OpenAI Direct:**
+```bash
+# .env
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-...
+
+# Test with reasoning model
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model opus -p "think through this problem"
+```
+
+**Ollama (Local):**
+```bash
+# .env
+OPENAI_BASE_URL=http://localhost:11434/v1
+ANTHROPIC_DEFAULT_SONNET_MODEL=qwen2.5:14b
+
+# Start Ollama first
+ollama serve &
+
+# Test proxy
+./claude-code-proxy -s &
+ANTHROPIC_BASE_URL=http://localhost:8082 claude --model sonnet -p "hi"
+```
+
 ## Simple Log Mode
 
 The `-s` or `--simple` flag enables one-line request summaries:
