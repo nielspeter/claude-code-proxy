@@ -42,55 +42,79 @@ jobs:
         VERSION=${GITHUB_REF#refs/tags/}
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
+        # Extract changelog section for this version
+        if [ -f CHANGELOG.md ]; then
+          # Get content between this version and next version heading
+          CHANGELOG=$(sed -n "/## \[${VERSION#v}\]/,/## \[/p" CHANGELOG.md | sed '$d' | tail -n +2)
+
+          if [ -n "$CHANGELOG" ]; then
+            echo "Found changelog for ${VERSION}"
+            # Save to file for body_path
+            echo "$CHANGELOG" > /tmp/changelog_section.md
+            echo "" >> /tmp/changelog_section.md
+            echo "has_changelog=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changelog section found for ${VERSION}"
+            echo "has_changelog=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "CHANGELOG.md not found"
+          echo "has_changelog=false" >> $GITHUB_OUTPUT
+        fi
+
+        # Always create installation instructions
+        cat >> /tmp/changelog_section.md << 'EOF'
+        ## Installation
+
+        Download the appropriate binary for your platform:
+
+        ### macOS (Apple Silicon)
+        ```bash
+        wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/claude-code-proxy-darwin-arm64
+        chmod +x claude-code-proxy-darwin-arm64
+        sudo mv claude-code-proxy-darwin-arm64 /usr/local/bin/claude-code-proxy
+        ```
+
+        ### macOS (Intel)
+        ```bash
+        wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/claude-code-proxy-darwin-amd64
+        chmod +x claude-code-proxy-darwin-amd64
+        sudo mv claude-code-proxy-darwin-amd64 /usr/local/bin/claude-code-proxy
+        ```
+
+        ### Linux (x86_64)
+        ```bash
+        wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/claude-code-proxy-linux-amd64
+        chmod +x claude-code-proxy-linux-amd64
+        sudo mv claude-code-proxy-linux-amd64 /usr/local/bin/claude-code-proxy
+        ```
+
+        ### Linux (ARM64)
+        ```bash
+        wget https://github.com/${{ github.repository }}/releases/download/${VERSION}/claude-code-proxy-linux-arm64
+        chmod +x claude-code-proxy-linux-arm64
+        sudo mv claude-code-proxy-linux-arm64 /usr/local/bin/claude-code-proxy
+        ```
+
+        ### Windows
+        Download `claude-code-proxy-windows-amd64.exe` and add to your PATH.
+
+        ## Verify Installation
+        ```bash
+        claude-code-proxy --help
+        ```
+
+        ## Quick Start
+        See [README.md](https://github.com/${{ github.repository }}#quick-start) for configuration instructions.
+        EOF
+
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
           dist/claude-code-proxy-*
           dist/checksums.txt
-        generate_release_notes: true
-        body: |
-          ## Installation
-
-          Download the appropriate binary for your platform:
-
-          ### macOS (Apple Silicon)
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.extract-release-notes.outputs.version }}/claude-code-proxy-darwin-arm64
-          chmod +x claude-code-proxy-darwin-arm64
-          sudo mv claude-code-proxy-darwin-arm64 /usr/local/bin/claude-code-proxy
-          ```
-
-          ### macOS (Intel)
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.extract-release-notes.outputs.version }}/claude-code-proxy-darwin-amd64
-          chmod +x claude-code-proxy-darwin-amd64
-          sudo mv claude-code-proxy-darwin-amd64 /usr/local/bin/claude-code-proxy
-          ```
-
-          ### Linux (x86_64)
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.extract-release-notes.outputs.version }}/claude-code-proxy-linux-amd64
-          chmod +x claude-code-proxy-linux-amd64
-          sudo mv claude-code-proxy-linux-amd64 /usr/local/bin/claude-code-proxy
-          ```
-
-          ### Linux (ARM64)
-          ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.extract-release-notes.outputs.version }}/claude-code-proxy-linux-arm64
-          chmod +x claude-code-proxy-linux-arm64
-          sudo mv claude-code-proxy-linux-arm64 /usr/local/bin/claude-code-proxy
-          ```
-
-          ### Windows
-          Download `claude-code-proxy-windows-amd64.exe` and add to your PATH.
-
-          ## Verify Installation
-          ```bash
-          claude-code-proxy --help
-          ```
-
-          ## Quick Start
-          See [README.md](https://github.com/${{ github.repository }}#quick-start) for configuration instructions.
+        body_path: /tmp/changelog_section.md
+        generate_release_notes: ${{ steps.extract-release-notes.outputs.has_changelog != 'true' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
