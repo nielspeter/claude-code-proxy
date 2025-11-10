@@ -276,7 +276,7 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg 
 	return nil
 }
 
-// ToolCallState tracks the state of a tool call during streaming (matches Python current_tool_calls)
+// ToolCallState tracks the state of a tool call during streaming
 type ToolCallState struct {
 	ID          string // Tool call ID from OpenAI
 	Name        string // Function name
@@ -307,13 +307,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // Increase buffer size
 
-	// State variables (matches Python implementation)
+	// State variables
 	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
 	textBlockIndex := 1                              // Text block is index 1 (thinking is 0)
 	toolBlockCounter := 2                            // Tool calls start at index 2
-	currentToolCalls := make(map[int]*ToolCallState) // Python: current_tool_calls = {}
-	finalStopReason := "end_turn"                    // Python: final_stop_reason = "end_turn"
-	usageData := map[string]interface{}{             // Python: usage_data = {...}
+	currentToolCalls := make(map[int]*ToolCallState)
+	finalStopReason := "end_turn"
+	usageData := map[string]interface{}{
 		"input_tokens":                0,
 		"output_tokens":               0,
 		"cache_creation_input_tokens": 0,
@@ -330,7 +330,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	thinkingBlockHasContent := false
 	textBlockStarted := false // Track if we've sent text block_start
 
-	// Send initial SSE events (matches Python lines 96-101)
+	// Send initial SSE events
 	writeSSEEvent(w, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
@@ -360,7 +360,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 	_ = w.Flush()
 
-	// Process streaming chunks (matches Python lines 111-210)
+	// Process streaming chunks
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -391,7 +391,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			fmt.Printf("[DEBUG] Raw chunk from OpenRouter: %s\n", dataJSON)
 		}
 
-		// Handle usage data (matches Python lines 120-131)
+		// Handle usage data
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
 			if cfg.Debug {
 				usageJSON, _ := json.Marshal(usage)
@@ -553,7 +553,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			_ = w.Flush()
 		}
 
-		// Handle text delta (matches Python lines 146-147)
+		// Handle text delta
 		if content, ok := delta["content"].(string); ok && content != "" {
 			// Send content_block_start for text block on first text delta
 			if !textBlockStarted {
@@ -580,7 +580,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			_ = w.Flush()
 		}
 
-		// Handle tool call deltas (matches Python lines 149-198)
+		// Handle tool call deltas
 		if toolCallsRaw, ok := delta["tool_calls"]; ok {
 			// Debug: Log raw tool_calls from provider
 			if cfg.Debug {
@@ -596,13 +596,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 						continue
 					}
 
-					// Get tool call index (matches Python line 152)
+					// Get tool call index
 					tcIndex := 0
 					if idx, ok := tcDelta["index"].(float64); ok {
 						tcIndex = int(idx)
 					}
 
-					// Initialize tool call tracking if not exists (matches Python lines 155-163)
+					// Initialize tool call tracking if not exists
 					if _, exists := currentToolCalls[tcIndex]; !exists {
 						currentToolCalls[tcIndex] = &ToolCallState{
 							ID:          "",
@@ -616,18 +616,18 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 					toolCall := currentToolCalls[tcIndex]
 
-					// Update tool call ID if provided (matches Python lines 168-169)
+					// Update tool call ID if provided
 					if id, ok := tcDelta["id"].(string); ok {
 						toolCall.ID = id
 					}
 
-					// Update function name (matches Python lines 172-174)
+					// Update function name
 					if functionData, ok := tcDelta["function"].(map[string]interface{}); ok {
 						if name, ok := functionData["name"].(string); ok {
 							toolCall.Name = name
 						}
 
-						// Start content block when we have complete initial data (matches Python lines 177-183)
+						// Start content block when we have complete initial data
 						if toolCall.ID != "" && toolCall.Name != "" && !toolCall.Started {
 							toolBlockCounter++
 							claudeIndex := textBlockIndex + toolBlockCounter
@@ -647,16 +647,15 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 							_ = w.Flush()
 						}
 
-						// Handle function arguments (matches Python lines 186-198)
-						// Python checks: "arguments" in function_data and tool_call["started"] and function_data["arguments"] is not None
-						// Go equivalent: type assertion handles nil check, Started flag, and we process even empty strings
+						// Handle function arguments
+						// Type assertion handles nil check, Started flag, and we process even empty strings
 						if args, ok := functionData["arguments"].(string); ok && toolCall.Started {
 							// Only accumulate if args is not empty
 							if args != "" {
 								toolCall.ArgsBuffer += args
 							}
 
-							// Try to parse complete JSON and send delta when we have valid JSON (matches Python 190-195)
+							// Try to parse complete JSON and send delta when we have valid JSON
 							if toolCall.ArgsBuffer != "" {
 								var jsonTest interface{}
 								if err := json.Unmarshal([]byte(toolCall.ArgsBuffer), &jsonTest); err == nil {
@@ -682,7 +681,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			}
 		}
 
-		// Handle finish reason (matches Python lines 200-210)
+		// Handle finish reason
 		// NOTE: Don't break here - with stream_options.include_usage, OpenAI sends usage in a chunk AFTER finish_reason
 		if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
 			switch finishReason {
@@ -699,9 +698,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		}
 	}
 
-	// Send final SSE events (matches Python lines 225-234)
+	// Send final SSE events
 
-	// Send content_block_stop for text block if it was started (matches Python line 226)
+	// Send content_block_stop for text block if it was started
 	if textBlockStarted {
 		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 			"type":  "content_block_stop",
@@ -710,9 +709,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		_ = w.Flush()
 	}
 
-	// Send content_block_stop for each tool call (matches Python lines 228-230)
+	// Send content_block_stop for each tool call
 	for _, toolData := range currentToolCalls {
-		// Python checks both Started AND claude_index is not None (line 229)
+		// Check both Started AND claude_index is not None
 		if toolData.Started && toolData.ClaudeIndex != 0 {
 			writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
@@ -741,8 +740,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	}
 
 	// Send message_delta with stop_reason and accumulated usage data
-	// NOTE: Unlike Python (which resets to zeros on line 232), we send the actual accumulated usage
-	// This fixes the "0 tokens" issue in Claude Code
+	// NOTE: We send the actual accumulated usage to fix the "0 tokens" issue in Claude Code
 	if cfg.Debug {
 		usageDataJSON, _ := json.Marshal(usageData)
 		fmt.Printf("[DEBUG] Sending message_delta with usageData: %s\n", string(usageDataJSON))
@@ -751,13 +749,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		"type": "message_delta",
 		"delta": map[string]interface{}{
 			"stop_reason":   finalStopReason,
-			"stop_sequence": nil, // Python includes this (line 233)
+			"stop_sequence": nil,
 		},
 		"usage": usageData,
 	})
 	_ = w.Flush()
 
-	// Send message_stop (matches Python line 234)
+	// Send message_stop
 	writeSSEEvent(w, "message_stop", map[string]interface{}{
 		"type": "message_stop",
 	})
