@@ -142,9 +142,22 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 		// Reasoning models (o1, o3, o4, gpt-5) require max_completion_tokens
 		// instead of the legacy max_tokens parameter.
 		// Uses dynamic detection from OpenRouter API for reasoning models.
+		//
+		// IMPORTANT: OpenWebUI/LiteLLM has a bug where it converts max_completion_tokens
+		// back to max_tokens before sending to Azure, causing failures for GPT-5.
+		// Workaround: Don't send any max tokens parameter for Unknown providers (OpenWebUI)
+		// with reasoning models.
+		provider := cfg.DetectProvider()
 		if cfg.IsReasoningModel(openaiModel) {
-			openaiReq.MaxCompletionTokens = claudeReq.MaxTokens
+			if provider == config.ProviderOpenAI {
+				// OpenAI Direct: Use max_completion_tokens
+				openaiReq.MaxCompletionTokens = claudeReq.MaxTokens
+			}
+			// For ProviderUnknown (OpenWebUI): Don't set any max tokens parameter
+			// This is a workaround for OpenWebUI/LiteLLM bug that converts
+			// max_completion_tokens to max_tokens, causing Azure to reject it
 		} else {
+			// Non-reasoning models: Use standard max_tokens
 			openaiReq.MaxTokens = claudeReq.MaxTokens
 		}
 	}
