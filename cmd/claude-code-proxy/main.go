@@ -77,18 +77,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fetch reasoning models from OpenRouter (dynamic detection)
-	// This happens asynchronously and non-blocking - falls back to hardcoded patterns if it fails
-	go func() {
-		if err := cfg.FetchReasoningModels(); err != nil {
-			// Silent failure - hardcoded fallback will work
-			if cfg.Debug {
-				fmt.Printf("[DEBUG] Failed to fetch reasoning models from OpenRouter: %v\n", err)
-			}
-		}
-	}()
-
 	// Start HTTP server (blocks)
+	// Note: No need to pre-fetch reasoning models - adaptive per-model detection
+	// handles all models automatically through retry mechanism
 	if err := server.Start(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)
 		os.Exit(1)
