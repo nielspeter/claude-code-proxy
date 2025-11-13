@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2025-11-13
+
+### Added
+- **Adaptive Per-Model Capability Detection** - Complete refactor replacing hardcoded patterns (#7)
+  - Automatically learns which parameters each `(provider, model)` combination supports
+  - Per-model capability caching with `CacheKey{BaseURL, Model}` structure
+  - Thread-safe in-memory cache protected by `sync.RWMutex`
+  - Debug logging for cache hits/misses visible with `-d` flag
+- **Zero-Configuration Provider Compatibility**
+  - Works with any OpenAI-compatible provider without code changes
+  - Automatic retry mechanism with error-based detection
+  - Broad keyword matching for parameter error detection
+  - No status code restrictions (handles misconfigured providers)
+- **OpenWebUI Support** - Native support for OpenWebUI/LiteLLM backends
+  - Automatically adapts to OpenWebUI's parameter quirks
+  - First request detection (~1-2s penalty), instant subsequent requests
+  - Tested with GPT-5 and GPT-4.1 models
+
+### Changed
+- **Removed ~100 lines of hardcoded model patterns**
+  - Deleted `IsReasoningModel()` function with gpt-5/o1/o2/o3/o4 patterns
+  - Deleted `FetchReasoningModels()` function and OpenRouter API calls
+  - Deleted `ReasoningModelCache` struct and related code
+  - Removed unused imports: `encoding/json`, `net/http` from config.go
+- **Refactored capability detection system**
+  - Changed from per-provider to per-model caching
+  - Struct-based cache keys (zero collision risk vs string concatenation)
+  - `GetProviderCapabilities()` → `GetModelCapabilities()`
+  - `SetProviderCapabilities()` → `SetModelCapabilities()`
+  - `ShouldUseMaxCompletionTokens()` now uses per-model cache
+- **Enhanced retry logic in handlers.go**
+  - `isMaxTokensParameterError()` uses broad keyword matching
+  - `retryWithoutMaxCompletionTokens()` caches per-model capabilities
+  - Applied to both streaming and non-streaming handlers
+  - Removed status code restrictions for better provider compatibility
+
+### Removed
+- Hardcoded reasoning model patterns (gpt-5*, o1*, o2*, o3*, o4*)
+- OpenRouter reasoning models API integration
+- Provider-specific hardcoding for Unknown provider type
+- Unused configuration imports and dead code
+
+### Technical Details
+- **Cache Structure**: `map[CacheKey]*ModelCapabilities` where `CacheKey{BaseURL, Model}`
+- **Detection Flow**: Try max_completion_tokens → Error → Retry → Cache result
+- **Error Detection**: Broad keyword matching (parameter + unsupported/invalid) + our param names
+- **Cache Scope**: In-memory, thread-safe, cleared on restart
+- **Benefits**: Future-proof, zero user config, ~70 net lines removed
+
+### Documentation
+- Added "Adaptive Per-Model Detection" section to README.md with full implementation details
+- Updated CLAUDE.md with comprehensive per-model caching documentation
+- Cleaned up docs/ folder - removed planning artifacts and superseded documentation
+
+### Philosophy
+This release embodies the project philosophy: "Support all provider quirks automatically - never burden users with configurations they don't understand." The adaptive system eliminates special-casing and works with any current or future OpenAI-compatible provider.
+
 ## [1.2.0] - 2025-11-01
 
 ### Added

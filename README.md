@@ -25,6 +25,10 @@ A lightweight HTTP proxy that enables Claude Code to work with OpenAI-compatible
   - **OpenRouter**: 200+ models (GPT, Grok, Gemini, etc.) through single API
   - **OpenAI Direct**: Native GPT-5 reasoning model support
   - **Ollama**: Free local inference with DeepSeek-R1, Llama3, Qwen, etc.
+- ✅ **Adaptive Per-Model Detection** - Zero-config provider compatibility
+  - Automatically learns which parameters each model supports
+  - No hardcoded model patterns - works with any future model/provider
+  - Per-model capability caching for instant subsequent requests
 - ✅ **Pattern-based routing** - Auto-detects Claude models and routes to appropriate backend models
 - ✅ **Zero dependencies** - Single ~10MB binary, no runtime needed
 - ✅ **Daemon mode** - Runs in background, serves multiple Claude Code sessions
@@ -389,6 +393,82 @@ See [CLAUDE.md](CLAUDE.md#manual-testing) for detailed testing instructions incl
    - Converts OpenAI SSE chunks to Claude SSE events
    - Generates proper event sequence (message_start, content_block_start, deltas, etc.)
    - Tracks content block indices for proper Claude Code rendering
+
+## Adaptive Per-Model Detection
+
+The proxy uses a fully adaptive system that automatically learns what parameters each model supports, eliminating the need for hardcoded model patterns or provider-specific configuration.
+
+### How It Works
+
+**Philosophy:** Support all provider quirks automatically - never burden users with configurations they don't understand.
+
+1. **First Request** (Cache Miss):
+   ```
+   [DEBUG] Cache MISS: gpt-5 → will auto-detect (try max_completion_tokens)
+   ```
+   - Proxy tries sending `max_completion_tokens` (correct for reasoning models)
+   - If provider returns "unsupported parameter" error, automatically retries without it
+   - Result is cached per `(provider, model)` combination
+
+2. **Subsequent Requests** (Cache Hit):
+   ```
+   [DEBUG] Cache HIT: gpt-5 → max_completion_tokens=true
+   ```
+   - Proxy uses cached knowledge immediately
+   - No trial-and-error needed
+   - Instant parameter selection
+
+### Benefits
+
+- **Zero Configuration** - No need to know which parameters each provider supports
+- **Future-Proof** - Works with any new model/provider without code changes
+- **Fast** - Only 1-2 second penalty on first request, instant thereafter
+- **Provider-Agnostic** - Automatically adapts to OpenRouter, OpenAI Direct, Ollama, OpenWebUI, or any OpenAI-compatible provider
+- **Per-Model Granularity** - Same model name on different providers cached separately
+
+### Cache Details
+
+**What's Cached:**
+```go
+CacheKey{
+    BaseURL: "https://gpt.erst.dk/api",  // Provider
+    Model:   "gpt-5"                      // Model name
+}
+→ ModelCapabilities{
+    UsesMaxCompletionTokens: false,       // Learned capability
+    LastChecked:             time.Now()   // Timestamp
+}
+```
+
+**Cache Scope:**
+- In-memory only (cleared on proxy restart)
+- Thread-safe (protected by `sync.RWMutex`)
+- Per (provider, model) combination
+- Visible in debug logs (`-d` flag)
+
+### Example: OpenWebUI
+
+When using OpenWebUI (which has a quirk with `max_completion_tokens`):
+
+| Request | What Happens | Duration |
+|---------|--------------|----------|
+| 1st | Try max_completion_tokens → Error → Retry without it | ~2 seconds |
+| 2nd+ | Use cached knowledge (no retry) | < 100ms |
+
+**No configuration needed** - the proxy learns and adapts automatically.
+
+### Debug Logging
+
+Enable debug mode to see cache activity:
+
+```bash
+./claude-code-proxy -d -s
+
+# Logs show:
+# [DEBUG] Cache MISS: gpt-5 → will auto-detect (try max_completion_tokens)
+# [DEBUG] Cached: model gpt-5 supports max_completion_tokens
+# [DEBUG] Cache HIT: gpt-5 → max_completion_tokens=true
+```
 
 ## License
 

@@ -6,12 +6,11 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -25,6 +24,27 @@ const (
 	ProviderOpenAI     ProviderType = "openai"
 	ProviderOllama     ProviderType = "ollama"
 	ProviderUnknown    ProviderType = "unknown"
+)
+
+// CacheKey uniquely identifies a (provider, model) combination for capability caching
+// Using a struct as map key provides type safety and zero collision risk
+type CacheKey struct {
+	BaseURL string // Provider base URL (e.g., "https://openrouter.ai/api/v1")
+	Model   string // Model name (e.g., "gpt-5", "openai/gpt-5")
+}
+
+// ModelCapabilities tracks which parameters a specific model supports
+// This is learned dynamically through adaptive retry mechanism
+type ModelCapabilities struct {
+	UsesMaxCompletionTokens bool      // Does this model use max_completion_tokens?
+	LastChecked             time.Time // When was this last verified?
+}
+
+// Global capability cache ((baseURL, model) -> capabilities)
+// Protected by mutex for thread-safe access across concurrent requests
+var (
+	modelCapabilityCache = make(map[CacheKey]*ModelCapabilities)
+	capabilityCacheMutex sync.RWMutex
 )
 
 // Config holds all proxy configuration
@@ -162,102 +182,52 @@ func (c *Config) IsLocalhost() bool {
 	return strings.Contains(baseURL, "localhost") || strings.Contains(baseURL, "127.0.0.1")
 }
 
-// ReasoningModelCache stores which models support reasoning capabilities.
-// This is fetched from OpenRouter's API on startup to avoid hardcoding model names.
-type ReasoningModelCache struct {
-	models    map[string]bool // model ID -> supports reasoning
-	populated bool
+
+// GetModelCapabilities retrieves cached capabilities for a (provider, model) combination.
+// Returns nil if no capabilities are cached yet (first request for this model).
+// Thread-safe with read lock.
+func GetModelCapabilities(key CacheKey) *ModelCapabilities {
+	capabilityCacheMutex.RLock()
+	defer capabilityCacheMutex.RUnlock()
+	return modelCapabilityCache[key]
 }
 
-// Global cache instance
-var reasoningCache = &ReasoningModelCache{
-	models: make(map[string]bool),
+// SetModelCapabilities caches the capabilities for a (provider, model) combination.
+// This is called after detecting what parameters a specific model supports through adaptive retry.
+// Thread-safe with write lock.
+func SetModelCapabilities(key CacheKey, capabilities *ModelCapabilities) {
+	capabilityCacheMutex.Lock()
+	defer capabilityCacheMutex.Unlock()
+	capabilities.LastChecked = time.Now()
+	modelCapabilityCache[key] = capabilities
 }
 
-// IsReasoningModel checks if a model supports reasoning capabilities.
-// For OpenRouter, this uses the cached API data. Otherwise falls back to pattern matching.
-func (c *Config) IsReasoningModel(modelName string) bool {
-	// For OpenRouter: use cached data if available
-	if c.DetectProvider() == ProviderOpenRouter && reasoningCache.populated {
-		if isReasoning, found := reasoningCache.models[modelName]; found {
-			return isReasoning
+// ShouldUseMaxCompletionTokens determines if we should send max_completion_tokens
+// based on cached model capabilities learned through adaptive detection.
+// No hardcoded model patterns - tries max_completion_tokens for ALL models on first request.
+func (c *Config) ShouldUseMaxCompletionTokens(modelName string) bool {
+	// Build cache key for this (provider, model) combination
+	key := CacheKey{
+		BaseURL: c.OpenAIBaseURL,
+		Model:   modelName,
+	}
+
+	// Check if we have cached knowledge about this specific model
+	caps := GetModelCapabilities(key)
+	if caps != nil {
+		// Cache hit - use learned capability
+		if c.Debug {
+			fmt.Printf("[DEBUG] Cache HIT: %s → max_completion_tokens=%v\n",
+				modelName, caps.UsesMaxCompletionTokens)
 		}
+		return caps.UsesMaxCompletionTokens
 	}
 
-	// Fallback to hardcoded pattern matching (OpenAI Direct, Ollama, or cache miss)
-	model := strings.ToLower(modelName)
-	model = strings.TrimPrefix(model, "azure/")
-	model = strings.TrimPrefix(model, "openai/")
-
-	// Check for o-series reasoning models (o1, o2, o3, o4, etc.)
-	if strings.HasPrefix(model, "o1") ||
-		strings.HasPrefix(model, "o2") ||
-		strings.HasPrefix(model, "o3") ||
-		strings.HasPrefix(model, "o4") {
-		return true
-	}
-
-	// Check for GPT-5 series (gpt-5, gpt-5-mini, gpt-5-turbo, etc.)
-	if strings.HasPrefix(model, "gpt-5") {
-		return true
-	}
-
-	return false
-}
-
-// FetchReasoningModels fetches the list of reasoning-capable models from OpenRouter's API.
-// This is called on startup to dynamically detect models that support reasoning,
-// avoiding the need to hardcode model names like deepseek-r1, etc.
-// No authentication required for this endpoint.
-func (c *Config) FetchReasoningModels() error {
-	// Only fetch for OpenRouter
-	if c.DetectProvider() != ProviderOpenRouter {
-		return nil
-	}
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// OpenRouter provides a filtered endpoint for reasoning models
-	req, err := http.NewRequest("GET", "https://openrouter.ai/api/v1/models?supported_parameters=reasoning", nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to fetch reasoning models: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Parse response
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Populate cache
-	for _, model := range result.Data {
-		reasoningCache.models[model.ID] = true
-	}
-	reasoningCache.populated = true
-
+	// Cache miss - default to trying max_completion_tokens first
+	// The retry mechanism in handlers.go will detect if it's not supported
+	// and automatically fall back to max_tokens, then cache the result
 	if c.Debug {
-		fmt.Printf("[DEBUG] Cached %d reasoning models from OpenRouter\n", len(result.Data))
+		fmt.Printf("[DEBUG] Cache MISS: %s → will auto-detect (try max_completion_tokens)\n", modelName)
 	}
-
-	return nil
+	return true
 }

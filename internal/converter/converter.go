@@ -137,12 +137,14 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 		}
 	}
 
-	// Set token limit
+	// Set token limit using adaptive per-model detection
 	if claudeReq.MaxTokens > 0 {
-		// Reasoning models (o1, o3, o4, gpt-5) require max_completion_tokens
-		// instead of the legacy max_tokens parameter.
-		// Uses dynamic detection from OpenRouter API for reasoning models.
-		if cfg.IsReasoningModel(openaiModel) {
+		// Use capability-based detection - NO hardcoded model patterns!
+		// ShouldUseMaxCompletionTokens checks cached per-model capabilities:
+		// - Cache hit: Use learned value (max_completion_tokens or max_tokens)
+		// - Cache miss: Try max_completion_tokens first (will auto-detect via retry)
+		// This works with ANY model/provider without code changes
+		if cfg.ShouldUseMaxCompletionTokens(openaiModel) {
 			openaiReq.MaxCompletionTokens = claudeReq.MaxTokens
 		} else {
 			openaiReq.MaxTokens = claudeReq.MaxTokens

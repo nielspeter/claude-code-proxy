@@ -106,6 +106,90 @@ The `mapModel()` function in converter.go implements intelligent routing:
 
 Override via environment variables to route to alternative models (Grok, Gemini, DeepSeek-R1, etc.).
 
+###  Adaptive Per-Model Capability Detection
+
+**Core Philosophy**: Support all provider quirks automatically - never burden users with advance configs.
+
+The proxy uses a fully adaptive system that automatically learns what parameters each model supports through error-based retry and caching. This eliminates ALL hardcoded model patterns (~100 lines removed in v1.3.0).
+
+**How It Works:**
+
+1. **First Request (Cache Miss)**:
+   - `ShouldUseMaxCompletionTokens()` checks cache for `CacheKey{BaseURL, Model}`
+   - Cache miss → defaults to trying `max_completion_tokens` (correct for reasoning models)
+   - If provider returns "unsupported parameter" error, `retryWithoutMaxCompletionTokens()` is called
+   - Retry succeeds → cache `{UsesMaxCompletionTokens: false}`
+   - Original request succeeds → cache `{UsesMaxCompletionTokens: true}`
+
+2. **Subsequent Requests (Cache Hit)**:
+   - `ShouldUseMaxCompletionTokens()` returns cached value immediately
+   - No trial-and-error needed
+   - ~1-2 second first request penalty, instant thereafter
+
+**Cache Structure** (`internal/config/config.go:29-48`):
+
+```go
+type CacheKey struct {
+    BaseURL string  // Provider base URL (e.g., "https://gpt.erst.dk/api")
+    Model   string  // Model name (e.g., "gpt-5")
+}
+
+type ModelCapabilities struct {
+    UsesMaxCompletionTokens bool      // Learned via adaptive retry
+    LastChecked             time.Time // Timestamp
+}
+
+// Global cache: map[CacheKey]*ModelCapabilities
+// Protected by sync.RWMutex for thread-safety
+```
+
+**Error Detection** (`internal/server/handlers.go:895-913`):
+
+```go
+func isMaxTokensParameterError(errorMessage string) bool {
+    errorLower := strings.ToLower(errorMessage)
+
+    // Broad keyword matching (no status code restriction)
+    hasParamIndicator := strings.Contains(errorLower, "parameter") ||
+                        strings.Contains(errorLower, "unsupported") ||
+                        strings.Contains(errorLower, "invalid")
+
+    hasOurParam := strings.Contains(errorLower, "max_tokens") ||
+                   strings.Contains(errorLower, "max_completion_tokens")
+
+    return hasParamIndicator && hasOurParam
+}
+```
+
+**Debug Logging**:
+
+Start proxy with `-d` flag to see cache activity:
+
+```bash
+./claude-code-proxy -d -s
+
+# Console output shows:
+[DEBUG] Cache MISS: gpt-5 → will auto-detect (try max_completion_tokens)
+[DEBUG] Cached: model gpt-5 supports max_completion_tokens (streaming)
+[DEBUG] Cache HIT: gpt-5 → max_completion_tokens=true
+```
+
+**Key Benefits**:
+
+- **Future-proof**: Works with any new model/provider without code changes
+- **Zero user config**: No need to know which parameters each provider supports
+- **Per-model granularity**: Same model name on different providers cached separately
+- **Thread-safe**: Protected by `sync.RWMutex` for concurrent requests
+- **In-memory**: Cleared on restart (first request re-detects)
+
+**What Was Removed** (v1.3.0):
+
+- `IsReasoningModel()` function (30 lines) - checked for gpt-5/o1/o2/o3/o4 patterns
+- `FetchReasoningModels()` function (56 lines) - OpenRouter API calls
+- `ReasoningModelCache` struct (11 lines) - per-provider reasoning model lists
+- Provider-specific hardcoding for Unknown provider type
+- ~100 lines total removed, replaced with ~30 lines of adaptive detection
+
 ## Configuration System
 
 Config loading priority (see `internal/config/config.go`):
