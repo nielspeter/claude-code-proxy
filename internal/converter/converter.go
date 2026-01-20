@@ -472,8 +472,9 @@ func convertFinishReason(openaiReason string) string {
 }
 
 // sanitizeToolInput fixes common model errors where parameters are malformed.
-// Specifically handles the issue where "query" parameter is halluncinated instead of
+// Specifically handles the issue where "query" parameter is hallucinated instead of
 // the correct required parameters (file_path, command, pattern, etc.).
+// This function ALWAYS removes the "query" parameter as it's never valid for any tool.
 func sanitizeToolInput(toolName string, argsJSON string) interface{} {
 	var input map[string]interface{}
 	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
@@ -481,46 +482,100 @@ func sanitizeToolInput(toolName string, argsJSON string) interface{} {
 		return argsJSON
 	}
 
-	// Check if 'query' exists and is an unexpected parameter
-	if queryVal, hasQuery := input["query"]; hasQuery {
-		// Remove 'query' - it's never a valid parameter for these tools
-		delete(input, "query")
+	// Always sanitize the input regardless of query presence
+	return SanitizeToolArgs(toolName, input)
+}
 
-		// If we have a query string, try to rescue it by mapping to the missing required field
-		if queryStr, ok := queryVal.(string); ok && queryStr != "" {
-			switch toolName {
-			case "Edit":
-				// Required: file_path, old_string, new_string
-				if _, ok := input["file_path"]; !ok {
-					input["file_path"] = queryStr
-				}
-			case "Grep":
-				// Required: pattern, path
-				if _, ok := input["pattern"]; !ok {
-					input["pattern"] = queryStr
-				}
-			case "Bash":
-				// Required: command
-				if _, ok := input["command"]; !ok {
-					input["command"] = queryStr
-				}
-			case "ReadFile":
-				// Required: file_path
-				if _, ok := input["file_path"]; !ok {
-					input["file_path"] = queryStr
-				}
-			case "WriteFile":
-				// Required: file_path, content
-				if _, ok := input["file_path"]; !ok {
-					input["file_path"] = queryStr
-				}
-			case "Glob":
-				// Required: pattern
-				if _, ok := input["pattern"]; !ok {
-					input["pattern"] = queryStr
-				}
+// SanitizeToolArgs fixes tool arguments by removing invalid "query" parameter
+// and mapping it to the correct required parameter based on tool type.
+// This is exported so it can be used in both streaming and non-streaming handlers.
+func SanitizeToolArgs(toolName string, input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return input
+	}
+
+	// Normalize tool name to lowercase for matching
+	toolNameLower := strings.ToLower(toolName)
+
+	// Extract and remove query parameter if present (case-insensitive)
+	var queryContent string
+	for key, val := range input {
+		if strings.ToLower(key) == "query" {
+			if str, ok := val.(string); ok {
+				queryContent = str
 			}
+			delete(input, key)
 		}
+	}
+
+	// If no query was found, just return the input as-is
+	if queryContent == "" {
+		return input
+	}
+
+	// Map query content to the correct required parameter based on tool type
+	// Using contains for fuzzy matching to handle variations like "mcp__xxx__Edit"
+	switch {
+	// Edit tool: requires file_path, old_string, new_string
+	case strings.Contains(toolNameLower, "edit"):
+		if _, ok := input["file_path"]; !ok {
+			input["file_path"] = queryContent
+		}
+
+	// Grep tool: requires pattern
+	case strings.Contains(toolNameLower, "grep"):
+		if _, ok := input["pattern"]; !ok {
+			input["pattern"] = queryContent
+		}
+		// Also set default path if missing
+		if _, ok := input["path"]; !ok {
+			input["path"] = "."
+		}
+
+	// Bash tool: requires command
+	case strings.Contains(toolNameLower, "bash"):
+		if _, ok := input["command"]; !ok {
+			input["command"] = queryContent
+		}
+
+	// Read/ReadFile tool: requires file_path
+	case strings.Contains(toolNameLower, "read"):
+		if _, ok := input["file_path"]; !ok {
+			input["file_path"] = queryContent
+		}
+
+	// Write/WriteFile tool: requires file_path, content
+	case strings.Contains(toolNameLower, "write"):
+		if _, ok := input["file_path"]; !ok {
+			input["file_path"] = queryContent
+		}
+
+	// Glob tool: requires pattern
+	case strings.Contains(toolNameLower, "glob"):
+		if _, ok := input["pattern"]; !ok {
+			input["pattern"] = queryContent
+		}
+
+	// LSP tool: requires filePath
+	case strings.Contains(toolNameLower, "lsp"):
+		if _, ok := input["filePath"]; !ok {
+			input["filePath"] = queryContent
+		}
+
+	// Task/Todo tools: use content or prompt
+	case strings.Contains(toolNameLower, "task") || strings.Contains(toolNameLower, "todo"):
+		if _, ok := input["prompt"]; !ok {
+			input["prompt"] = queryContent
+		}
+
+	// WebFetch/WebSearch: use url or query as appropriate
+	case strings.Contains(toolNameLower, "webfetch") || strings.Contains(toolNameLower, "fetch"):
+		if _, ok := input["url"]; !ok {
+			input["url"] = queryContent
+		}
+	case strings.Contains(toolNameLower, "websearch") || strings.Contains(toolNameLower, "search"):
+		// WebSearch actually uses "query" - but we already removed it, so restore it
+		input["query"] = queryContent
 	}
 
 	return input
