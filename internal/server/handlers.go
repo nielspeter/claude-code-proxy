@@ -1,4 +1,5 @@
 package server
+
 import (
 	"bufio"
 	"bytes"
@@ -77,7 +78,7 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	// 插入这段代码：强制修正 AI 的行为
+	// 插入这段代码：强制修正 AI 的行为 (修复 Query 参数问题)
 	if len(openaiReq.Messages) > 0 {
 		instruction := "\n\nIMPORTANT: When calling tools, you MUST use exact parameter names. NEVER use 'query' for tools like 'Edit' (use old_string/new_string), 'grep' (use pattern/path), or 'read' (use file_path)."
 		
@@ -191,6 +192,7 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 			tokensPerSec)
 	}
 
+	// 修复非流式模式下的参数
 	for _, block := range claudeResp.Content {
 		if block.Type == "tool_use" {
 			// 将 block.Input (可能是 interface{}) 转为 map
@@ -262,19 +264,6 @@ type ToolCallState struct {
 }
 
 // streamOpenAIToClaude converts OpenAI streaming responses to Claude's SSE event format.
-//
-// It processes the OpenAI SSE stream chunk-by-chunk, generating the proper sequence of
-// Claude events: message_start, content_block_start, content_block_delta, content_block_stop,
-// message_delta, and message_stop.
-//
-// Handles:
-//   - Thinking blocks from reasoning models (OpenRouter's reasoning_details, OpenAI's reasoning_content)
-//   - Text content deltas
-//   - Tool call deltas (accumulates JSON arguments across chunks)
-//   - Token usage tracking and throughput calculation for simple log mode
-//
-// The function maintains state to track content block indices, tool call accumulation,
-// and ensures proper event ordering for Claude Code compatibility.
 func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel string, cfg *config.Config, startTime time.Time) {
 	if cfg.Debug {
 		fmt.Printf("[DEBUG] streamOpenAIToClaude: Starting conversion\n")
@@ -284,8 +273,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 	// State variables
 	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
-	textBlockIndex := 1                              // Text block is index 1 (thinking is 0)
-	toolBlockCounter := 2                            // Tool calls start at index 2
+	
+	// -------------------------------------------------------------
+	// 修复重点：使用动态自增索引，防止索引不连续导致的循环输出 BUG
+	// -------------------------------------------------------------
+	nextIndex := 0 
+	textBlockIndex := -1      // 初始化为 -1，表示未分配
+	thinkingBlockIndex := -1  // 初始化为 -1，表示未分配
+	
 	currentToolCalls := make(map[int]*ToolCallState)
 	finalStopReason := "end_turn"
 	usageData := map[string]interface{}{
@@ -300,7 +295,6 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	}
 
 	// Thinking block tracking (to show thinking indicator in Claude Code)
-	thinkingBlockIndex := 0 // Thinking block is always index 0
 	thinkingBlockStarted := false
 	thinkingBlockHasContent := false
 	textBlockStarted := false // Track if we've sent text block_start
@@ -421,6 +415,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		if reasoningContent, ok := delta["reasoning_content"].(string); ok && reasoningContent != "" {
 			// Send content_block_start for thinking block on first thinking delta
 			if !thinkingBlockStarted {
+				thinkingBlockIndex = nextIndex // 使用动态索引
+				nextIndex++
+				
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
 					"type":  "content_block_start",
 					"index": thinkingBlockIndex,
@@ -471,6 +468,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 						if thinkingText != "" {
 							// Send content_block_start for thinking block on first thinking delta
 							if !thinkingBlockStarted {
+								thinkingBlockIndex = nextIndex // 使用动态索引
+								nextIndex++
+
 								writeSSEEvent(w, "content_block_start", map[string]interface{}{
 									"type":  "content_block_start",
 									"index": thinkingBlockIndex,
@@ -504,6 +504,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		if reasoning, ok := delta["reasoning"].(string); ok && reasoning != "" {
 			// Send content_block_start for thinking block on first thinking delta
 			if !thinkingBlockStarted {
+				thinkingBlockIndex = nextIndex // 使用动态索引
+				nextIndex++
+
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
 					"type":  "content_block_start",
 					"index": thinkingBlockIndex,
@@ -533,6 +536,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		if content, ok := delta["content"].(string); ok && content != "" {
 			// Send content_block_start for text block on first text delta
 			if !textBlockStarted {
+				textBlockIndex = nextIndex // 使用动态索引
+				nextIndex++
+
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
 					"type":  "content_block_start",
 					"index": textBlockIndex,
@@ -597,9 +603,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 						toolCall.ID = id
 					}
 
-					// 在这里插入这段逻辑：
-					// 如果准备开始发送工具块，但还没发送过文本块，强制补齐一个 text 块
+					// -----------------------------------------------------------------
+					// 修复重点：如果准备开始发送工具块，但还没发送过文本块，
+					// 强制补齐一个 text 块，并使用动态索引
+					// -----------------------------------------------------------------
 					if !textBlockStarted {
+						textBlockIndex = nextIndex // 使用动态索引
+						nextIndex++
+
 						writeSSEEvent(w, "content_block_start", map[string]interface{}{
 							"type":  "content_block_start",
 							"index": textBlockIndex,
@@ -614,7 +625,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 							"index": textBlockIndex,
 							"delta": map[string]interface{}{
 								"type": "text_delta",
-								"text": "我将使用以下工具：",
+								"text": "Using tool:", // 简单的占位符
 							},
 						})
 						textBlockStarted = true
@@ -629,14 +640,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 						// Start content block when we have complete initial data
 						if toolCall.ID != "" && toolCall.Name != "" && !toolCall.Started {
-							toolBlockCounter++
-							claudeIndex := textBlockIndex + toolBlockCounter
-							toolCall.ClaudeIndex = claudeIndex
+							// 使用动态索引
+							toolCall.ClaudeIndex = nextIndex
+							nextIndex++
 							toolCall.Started = true
 
 							writeSSEEvent(w, "content_block_start", map[string]interface{}{
 								"type":  "content_block_start",
-								"index": claudeIndex,
+								"index": toolCall.ClaudeIndex,
 								"content_block": map[string]interface{}{
 									"type":  "tool_use",
 									"id":    toolCall.ID,
@@ -701,7 +712,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	// Send final SSE events
 
 	// Send content_block_stop for text block if it was started
-	if textBlockStarted {
+	if textBlockStarted && textBlockIndex != -1 {
 		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 			"type":  "content_block_stop",
 			"index": textBlockIndex,
@@ -712,7 +723,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	// Send content_block_stop for each tool call
 	for _, toolData := range currentToolCalls {
 		// Check both Started AND claude_index is not None
-		if toolData.Started && toolData.ClaudeIndex != 0 {
+		if toolData.Started && toolData.ClaudeIndex != -1 {
 			writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": toolData.ClaudeIndex,
@@ -722,7 +733,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	}
 
 	// Send content_block_stop for thinking block if it had content
-	if thinkingBlockStarted && thinkingBlockHasContent {
+	if thinkingBlockStarted && thinkingBlockHasContent && thinkingBlockIndex != -1 {
 		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 			"type":  "content_block_stop",
 			"index": thinkingBlockIndex,
@@ -1119,4 +1130,3 @@ func fixToolArguments(toolName string, args map[string]interface{}) map[string]i
 	delete(args, queryKey)
 	return args
 }
-
