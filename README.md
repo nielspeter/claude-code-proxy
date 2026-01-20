@@ -365,7 +365,9 @@ ANTHROPIC_BASE_URL=http://localhost:8082 claude --model haiku -p "hi"
 
 # Check proxy logs
 ./claude-code-proxy status
-tail -f /tmp/claude-code-proxy.log
+# Log location varies by OS:
+# - Windows: %TEMP%\claude-code-proxy-golang\claude-code-proxy.log
+# - Linux/Mac: /tmp/claude-code-proxy-golang/claude-code-proxy.log
 
 # Stop proxy
 ./claude-code-proxy stop

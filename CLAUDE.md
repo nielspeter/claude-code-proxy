@@ -268,7 +268,9 @@ Check the proxy logs to see which backend model was used:
 # [REQ] https://openrouter.ai/api/v1 model=openai/gpt-5 in=20 out=5 tok/s=25.3
 
 # Debug mode shows full request/response JSON
-tail -f /tmp/claude-code-proxy.log
+# Log files are stored in OS temp directory:
+# - Windows: %TEMP%\claude-code-proxy-golang\claude-code-proxy.log
+# - Linux/Mac: /tmp/claude-code-proxy-golang/claude-code-proxy.log
 ```
 
 ### 4. Test tool calling
@@ -367,8 +369,10 @@ Token extraction requires `float64 → int` conversion because JSON unmarshals n
 ## Daemon Process
 
 The proxy runs as a background daemon (see `internal/daemon/daemon.go`):
-- Creates PID file at `/tmp/claude-code-proxy.pid`
-- Redirects stdout/stderr to `/tmp/claude-code-proxy.log`
+- Creates PID file in OS-specific temp directory under `claude-code-proxy-golang/`
+  - Windows: `%TEMP%\claude-code-proxy-golang\claude-code-proxy.pid`
+  - Linux/Mac: `/tmp/claude-code-proxy-golang/claude-code-proxy.pid`
+- Redirects stdout/stderr to log file in the same directory
 - `./claude-code-proxy status` checks if process is running
 - `./claude-code-proxy stop` kills the daemon via PID file
 

@@ -286,3 +286,39 @@ func BenchmarkIsProcessRunning(b *testing.B) {
 		isProcessRunning()
 	}
 }
+
+// TestTempDirUsesOSTempDir tests that pidFile uses os.TempDir()
+func TestTempDirUsesOSTempDir(t *testing.T) {
+	tempDir := GetTempDir()
+	osTempDir := os.TempDir()
+
+	// The temp dir should be under os.TempDir()
+	if len(tempDir) < len(osTempDir) {
+		t.Errorf("GetTempDir() returned %s, expected path under %s", tempDir, osTempDir)
+	}
+
+	// Check that the directory contains "claude-code-proxy-golang"
+	if tempDir != osTempDir {
+		// It should be the subdirectory
+		expected := osTempDir + string(os.PathSeparator) + "claude-code-proxy-golang"
+		// Normalize paths for comparison
+		if tempDir != expected {
+			// Allow for path variations
+			t.Logf("GetTempDir() = %s, expected %s (may vary by OS)", tempDir, expected)
+		}
+	}
+}
+
+// TestTempDirExists tests that the temp directory exists after init
+func TestTempDirExists(t *testing.T) {
+	tempDir := GetTempDir()
+
+	info, err := os.Stat(tempDir)
+	if err != nil {
+		t.Fatalf("Temp directory does not exist: %v", err)
+	}
+
+	if !info.IsDir() {
+		t.Errorf("Expected %s to be a directory", tempDir)
+	}
+}

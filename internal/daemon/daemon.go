@@ -9,14 +9,40 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
 
 const (
-	pidFile   = "/tmp/claude-code-proxy.pid"
 	healthURL = "http://localhost:8082/health"
 )
+
+var (
+	// pidFile is dynamically initialized to use OS-specific temp directory
+	pidFile string
+)
+
+// init ensures the temp directory exists and initializes pidFile
+func init() {
+	// Get OS-specific temp directory
+	tempDir := os.TempDir()
+	proxyTempDir := filepath.Join(tempDir, "claude-code-proxy-golang")
+
+	// Check if directory exists, create if not
+	if _, err := os.Stat(proxyTempDir); os.IsNotExist(err) {
+		// Create directory with appropriate permissions
+		if err := os.MkdirAll(proxyTempDir, 0755); err != nil {
+			// Fallback to system temp dir if creation fails
+			fmt.Fprintf(os.Stderr, "Warning: Failed to create %s: %v\n", proxyTempDir, err)
+			pidFile = filepath.Join(tempDir, "claude-code-proxy.pid")
+			return
+		}
+	}
+
+	// Set pidFile path
+	pidFile = filepath.Join(proxyTempDir, "claude-code-proxy.pid")
+}
 
 // IsRunning checks if the proxy daemon is running
 func IsRunning() bool {
@@ -127,4 +153,9 @@ func isProcessRunning() bool {
 // Cleanup should be called on shutdown
 func Cleanup() {
 	cleanupPID()
+}
+
+// GetTempDir returns the temp directory used by the proxy
+func GetTempDir() string {
+	return filepath.Dir(pidFile)
 }
