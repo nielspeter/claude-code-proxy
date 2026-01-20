@@ -1,5 +1,4 @@
 package server
-
 import (
 	"bufio"
 	"bytes"
@@ -76,6 +75,23 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 				"message": err.Error(),
 			},
 		})
+	}
+
+	// 插入这段代码：强制修正 AI 的行为
+	if len(openaiReq.Messages) > 0 {
+		instruction := "\n\nIMPORTANT: When calling tools, you MUST use exact parameter names. NEVER use 'query' for tools like 'Edit' (use old_string/new_string), 'grep' (use pattern/path), or 'read' (use file_path)."
+		
+		// 如果第一条是系统消息，追加进去
+		if openaiReq.Messages[0].Role == "system" {
+			// 使用类型断言将 interface{} 转为 string
+			contentStr, _ := openaiReq.Messages[0].Content.(string)
+			openaiReq.Messages[0].Content = contentStr + instruction
+		} else {
+			// 否则在最前面插入一条系统消息
+			openaiReq.Messages = append([]models.OpenAIMessage{
+				{Role: "system", Content: instruction},
+			}, openaiReq.Messages...)
+		}
 	}
 
 	// Debug: Log converted OpenAI request
@@ -173,6 +189,15 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 			claudeResp.Usage.InputTokens,
 			claudeResp.Usage.OutputTokens,
 			tokensPerSec)
+	}
+
+	for _, block := range claudeResp.Content {
+		if block.Type == "tool_use" {
+			// 将 block.Input (可能是 interface{}) 转为 map
+			if args, ok := block.Input.(map[string]interface{}); ok {
+				block.Input = fixToolArguments(block.Name, args)
+			}
+		}
 	}
 
 	return c.JSON(claudeResp)
@@ -401,7 +426,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					"index": thinkingBlockIndex,
 					"content_block": map[string]interface{}{
 						"type": "thinking",
-						"thinking": "",
+						"thinking": "", // <-- 防止思维链校验失败
 					},
 				})
 				thinkingBlockStarted = true
@@ -570,6 +595,30 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					// Update tool call ID if provided
 					if id, ok := tcDelta["id"].(string); ok {
 						toolCall.ID = id
+					}
+
+					// 在这里插入这段逻辑：
+					// 如果准备开始发送工具块，但还没发送过文本块，强制补齐一个 text 块
+					if !textBlockStarted {
+						writeSSEEvent(w, "content_block_start", map[string]interface{}{
+							"type":  "content_block_start",
+							"index": textBlockIndex,
+							"content_block": map[string]interface{}{
+								"type": "text",
+								"text": "",
+							},
+						})
+						// 补齐一段话，防止 Claude Code 报 (no content)
+						writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+							"type":  "content_block_delta",
+							"index": textBlockIndex,
+							"delta": map[string]interface{}{
+								"type": "text_delta",
+								"text": "我将使用以下工具：",
+							},
+						})
+						textBlockStarted = true
+						_ = w.Flush()
 					}
 
 					// Update function name
@@ -1024,3 +1073,50 @@ func handleCountTokens(c *fiber.Ctx, cfg *config.Config) error {
 		"input_tokens": 100,
 	})
 }
+
+//修复函数，防止模型擅自使用 query
+func fixToolArguments(toolName string, args map[string]interface{}) map[string]interface{} {
+	// 统一转为小写进行模糊匹配
+	loweredName := strings.ToLower(toolName)
+	
+	// 查找任何形式的 query 参数
+	var queryContent string
+	var queryKey string
+	for k, v := range args {
+		if strings.ToLower(k) == "query" {
+			if s, ok := v.(string); ok {
+				queryContent = s
+				queryKey = k
+				break
+			}
+		}
+	}
+
+	if queryKey == "" {
+		return args
+	}
+
+	// 根据工具类型分发参数
+	switch {
+	case strings.Contains(loweredName, "edit"):
+		if _, ok := args["old_string"]; !ok { args["old_string"] = queryContent }
+	case strings.Contains(loweredName, "grep"):
+		if _, ok := args["pattern"]; !ok { args["pattern"] = queryContent }
+		if _, ok := args["path"]; !ok { args["path"] = "." }
+	case strings.Contains(loweredName, "read"):
+		if _, ok := args["file_path"]; !ok { args["file_path"] = queryContent }
+	case strings.Contains(loweredName, "write"):
+		if _, ok := args["file_path"]; !ok { args["file_path"] = queryContent }
+	case strings.Contains(loweredName, "bash"):
+		if _, ok := args["command"]; !ok { args["command"] = queryContent }
+	case strings.Contains(loweredName, "task"), strings.Contains(loweredName, "todo"):
+		// 对于任务类工具，如果 AI 输出了 query，通常其实是想表达 content 或 note
+		if _, ok := args["content"]; !ok { args["content"] = queryContent }
+		if _, ok := args["note"]; !ok { args["note"] = queryContent }
+	}
+
+	// 删掉万恶之源 query
+	delete(args, queryKey)
+	return args
+}
+
