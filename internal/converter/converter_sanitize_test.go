@@ -57,6 +57,40 @@ func TestConvertResponse_Sanitization(t *testing.T) {
 				"command": "ls -la",
 			},
 		},
+		{
+			name:     "Edit with JSON-encoded query containing all params",
+			toolName: "Edit",
+			argsJSON: `{"query":"{\"file_path\":\"test.go\",\"old_string\":\"hello\",\"new_string\":\"world\"}"}`,
+			expectedInput: map[string]interface{}{
+				"file_path":  "test.go",
+				"old_string": "hello",
+				"new_string": "world",
+			},
+		},
+		{
+			name:     "Bash with JSON-encoded query containing command",
+			toolName: "Bash",
+			argsJSON: `{"query":"{\"command\":\"git status\"}"}`,
+			expectedInput: map[string]interface{}{
+				"command": "git status",
+			},
+		},
+		{
+			name:     "MCP Edit tool with query (mcp__xxx__edit pattern)",
+			toolName: "mcp__O6ftSfA2gzGnlTgf5dNAn__edit",
+			argsJSON: `{"query":"test.txt"}`,
+			expectedInput: map[string]interface{}{
+				"file_path": "test.txt",
+			},
+		},
+		{
+			name:     "MCP Read tool with query",
+			toolName: "mcp__O6ftSfA2gzGnlTgf5dNAn__read",
+			argsJSON: `{"query":"/path/to/file.txt"}`,
+			expectedInput: map[string]interface{}{
+				"file_path": "/path/to/file.txt",
+			},
+		},
 	}
 
 	for _, tt := range tests {

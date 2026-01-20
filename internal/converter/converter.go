@@ -1,8 +1,7 @@
-// Package converter handles bidirectional conversion between Claude and OpenAI API formats.
+// Package converter 处理 Claude 和 OpenAI API 格式之间的双向转换。
 //
-// It provides functions to convert Claude API requests to OpenAI-compatible format and
-// OpenAI responses back to Claude format. This includes mapping models, converting message
-// structures, handling tool calls, and extracting thinking blocks from reasoning responses.
+// 提供将 Claude API 请求转换为 OpenAI 兼容格式的函数，以及将 OpenAI 响应转换回 Claude 格式的函数。
+// 包括模型映射、消息结构转换、工具调用处理，以及从推理响应中提取思考块。
 package converter
 
 import (
@@ -14,8 +13,8 @@ import (
 	"github.com/claude-code-proxy/proxy/pkg/models"
 )
 
-// Default model mappings when env overrides are not set
-// These can be overridden using:
+// 默认模型映射（当环境变量未设置时使用）
+// 可通过以下环境变量覆盖：
 //   - ANTHROPIC_DEFAULT_OPUS_MODEL
 //   - ANTHROPIC_DEFAULT_SONNET_MODEL
 //   - ANTHROPIC_DEFAULT_HAIKU_MODEL
@@ -25,20 +24,20 @@ const (
 	DefaultHaikuModel  = "gpt-5-mini"
 )
 
-// extractSystemText extracts system text from Claude's flexible system parameter.
-// Claude supports both string format ("system": "text") and array format with content blocks.
-// This function normalizes both formats to a single string for OpenAI compatibility.
+// extractSystemText 从 Claude 的灵活系统参数中提取系统文本。
+// Claude 支持字符串格式 ("system": "text") 和包含内容块的数组格式。
+// 此函数将两种格式标准化为单个字符串，以兼容 OpenAI。
 func extractSystemText(system interface{}) string {
 	if system == nil {
 		return ""
 	}
 
-	// Handle string format
+	// 处理字符串格式
 	if systemStr, ok := system.(string); ok {
 		return systemStr
 	}
 
-	// Handle array format
+	// 处理数组格式
 	if systemArr, ok := system.([]interface{}); ok {
 		var textParts []string
 		for _, block := range systemArr {
@@ -56,43 +55,43 @@ func extractSystemText(system interface{}) string {
 	return ""
 }
 
-// extractReasoningText extracts text from OpenRouter reasoning_details
-// Handles different reasoning detail types: reasoning.text, reasoning.summary, reasoning.encrypted
+// extractReasoningText 从 OpenRouter reasoning_details 中提取文本
+// 处理不同的推理详情类型：reasoning.text、reasoning.summary、reasoning.encrypted
 func extractReasoningText(detail map[string]interface{}) string {
 	detailType, _ := detail["type"].(string)
 
 	switch detailType {
 	case "reasoning.text":
-		// Extract text field
+		// 提取文本字段
 		if text, ok := detail["text"].(string); ok {
 			return text
 		}
 	case "reasoning.summary":
-		// Extract summary field
+		// 提取摘要字段
 		if summary, ok := detail["summary"].(string); ok {
 			return summary
 		}
 	case "reasoning.encrypted":
-		// Skip encrypted reasoning - it's base64 encrypted data not meant to be shown
-		// Models like Grok send this alongside reasoning.summary
+		// 跳过加密的推理内容 - 这是 base64 编码的加密数据，不应显示
+		// 像 Grok 这样的模型会在 reasoning.summary 旁边发送这个
 		return ""
 	}
 
 	return ""
 }
 
-// ConvertRequest converts a Claude API request to OpenAI format
+// ConvertRequest 将 Claude API 请求转换为 OpenAI 格式
 func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models.OpenAIRequest, error) {
-	// Map model using pattern-based routing
+	// 使用基于模式的路由映射模型
 	openaiModel := mapModel(claudeReq.Model, cfg)
 
-	// Extract system message (can be string or array of content blocks)
+	// 提取系统消息（可以是字符串或内容块数组）
 	systemText := extractSystemText(claudeReq.System)
 
-	// Convert messages
+	// 转换消息
 	openaiMessages := convertMessages(claudeReq.Messages, systemText)
 
-	// Build OpenAI request
+	// 构建 OpenAI 请求
 	openaiReq := &models.OpenAIRequest{
 		Model:       openaiModel,
 		Messages:    openaiMessages,
@@ -101,15 +100,15 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 		Stream:      claudeReq.Stream,
 	}
 
-	// Enable usage tracking and reasoning - provider-specific
+	// 启用使用量跟踪和推理 - 针对不同提供商的特定设置
 	if claudeReq.Stream != nil && *claudeReq.Stream {
 		provider := cfg.DetectProvider()
 
 		switch provider {
 		case config.ProviderOpenRouter:
-			// OpenRouter needs reasoning blocks and usage tracking enabled
-			// - reasoning.enabled: Enables thinking blocks in response
-			// - usage.include: Tracks token usage even in streaming mode
+			// OpenRouter 需要启用推理块和使用量跟踪
+			// - reasoning.enabled: 在响应中启用思考块
+			// - usage.include: 即使在流式模式下也跟踪令牌使用量
 			openaiReq.StreamOptions = map[string]interface{}{
 				"include_usage": true,
 			}
@@ -121,8 +120,8 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 			}
 
 		case config.ProviderOpenAI:
-			// OpenAI GPT-5 models support reasoning_effort parameter
-			// This controls how much time the model spends thinking before responding
+			// OpenAI GPT-5 模型支持 reasoning_effort 参数
+			// 此参数控制模型在响应前花多少时间思考
 			openaiReq.StreamOptions = map[string]interface{}{
 				"include_usage": true,
 			}
@@ -336,8 +335,9 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 	return openaiMessages
 }
 
-// convertTools converts Claude tool definitions to OpenAI function calling format.
-// Maps tool name, description, and input_schema to OpenAI's function structure.
+// convertTools 将 Claude 工具定义转换为 OpenAI 函数调用格式。
+// 将工具名称、描述和 input_schema 映射到 OpenAI 的函数结构。
+// 同时在描述中添加参数提示，帮助模型正确使用参数。
 func convertTools(claudeTools []models.Tool) []models.OpenAITool {
 	openaiTools := make([]models.OpenAITool, len(claudeTools))
 
@@ -346,11 +346,37 @@ func convertTools(claudeTools []models.Tool) []models.OpenAITool {
 			Type: "function",
 		}
 		openaiTools[i].Function.Name = tool.Name
-		openaiTools[i].Function.Description = tool.Description
+		// 增强工具描述，添加参数使用提示
+		openaiTools[i].Function.Description = enhanceToolDescription(tool.Name, tool.Description)
 		openaiTools[i].Function.Parameters = tool.InputSchema
 	}
 
 	return openaiTools
+}
+
+// enhanceToolDescription 增强工具描述，添加参数使用提示
+// 这有助于防止模型使用错误的参数名称（如 "query"）
+func enhanceToolDescription(toolName, description string) string {
+	toolNameLower := strings.ToLower(toolName)
+
+	// 根据工具类型添加参数提示
+	var paramHint string
+	switch {
+	case strings.Contains(toolNameLower, "edit"):
+		paramHint = "\n\n【重要】必须使用参数: file_path, old_string, new_string。禁止使用 query 参数。"
+	case strings.Contains(toolNameLower, "bash"):
+		paramHint = "\n\n【重要】必须使用参数: command。禁止使用 query 参数。"
+	case strings.Contains(toolNameLower, "read"):
+		paramHint = "\n\n【重要】必须使用参数: file_path。禁止使用 query 参数。"
+	case strings.Contains(toolNameLower, "write"):
+		paramHint = "\n\n【重要】必须使用参数: file_path, content。禁止使用 query 参数。"
+	case strings.Contains(toolNameLower, "grep"):
+		paramHint = "\n\n【重要】必须使用参数: pattern。禁止使用 query 参数。"
+	case strings.Contains(toolNameLower, "glob"):
+		paramHint = "\n\n【重要】必须使用参数: pattern。禁止使用 query 参数。"
+	}
+
+	return description + paramHint
 }
 
 // ConvertResponse converts an OpenAI response to Claude format
@@ -489,6 +515,11 @@ func sanitizeToolInput(toolName string, argsJSON string) interface{} {
 // SanitizeToolArgs fixes tool arguments by removing invalid "query" parameter
 // and mapping it to the correct required parameter based on tool type.
 // This is exported so it can be used in both streaming and non-streaming handlers.
+//
+// This function handles several scenarios:
+// 1. Model sends {"query": "..."} instead of proper parameters
+// 2. Model sends {"query": "{...}"} with JSON-encoded parameters inside
+// 3. Model sends correct parameters with an extra "query" field
 func SanitizeToolArgs(toolName string, input map[string]interface{}) map[string]interface{} {
 	if input == nil {
 		return input
@@ -511,6 +542,24 @@ func SanitizeToolArgs(toolName string, input map[string]interface{}) map[string]
 	// If no query was found, just return the input as-is
 	if queryContent == "" {
 		return input
+	}
+
+	// First, try to parse query as JSON object and merge into input
+	// This handles cases where model sends {"query": "{\"file_path\":\"...\", \"old_string\":\"...\"}"}
+	if strings.HasPrefix(strings.TrimSpace(queryContent), "{") {
+		var parsedQuery map[string]interface{}
+		if err := json.Unmarshal([]byte(queryContent), &parsedQuery); err == nil {
+			// Merge parsed query into input (don't overwrite existing keys)
+			for k, v := range parsedQuery {
+				if _, exists := input[k]; !exists {
+					input[k] = v
+				}
+			}
+			// After merging, if we have all required params, return
+			if hasRequiredParams(toolNameLower, input) {
+				return input
+			}
+		}
 	}
 
 	// Map query content to the correct required parameter based on tool type
@@ -579,4 +628,33 @@ func SanitizeToolArgs(toolName string, input map[string]interface{}) map[string]
 	}
 
 	return input
+}
+
+// hasRequiredParams checks if the input has the minimum required parameters for a tool
+func hasRequiredParams(toolNameLower string, input map[string]interface{}) bool {
+	switch {
+	case strings.Contains(toolNameLower, "edit"):
+		_, hasFilePath := input["file_path"]
+		_, hasOldString := input["old_string"]
+		_, hasNewString := input["new_string"]
+		return hasFilePath && hasOldString && hasNewString
+	case strings.Contains(toolNameLower, "bash"):
+		_, hasCommand := input["command"]
+		return hasCommand
+	case strings.Contains(toolNameLower, "read"):
+		_, hasFilePath := input["file_path"]
+		return hasFilePath
+	case strings.Contains(toolNameLower, "grep"):
+		_, hasPattern := input["pattern"]
+		return hasPattern
+	case strings.Contains(toolNameLower, "glob"):
+		_, hasPattern := input["pattern"]
+		return hasPattern
+	case strings.Contains(toolNameLower, "write"):
+		_, hasFilePath := input["file_path"]
+		_, hasContent := input["content"]
+		return hasFilePath && hasContent
+	default:
+		return true
+	}
 }

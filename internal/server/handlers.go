@@ -16,9 +16,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// addOpenRouterHeaders adds OpenRouter-specific HTTP headers for better rate limits.
-// Sets HTTP-Referer and X-Title headers when configured, which helps with OpenRouter's
-// rate limiting and usage tracking.
+// addOpenRouterHeaders 添加 OpenRouter 特定的 HTTP 头以获得更好的速率限制。
+// 配置后设置 HTTP-Referer 和 X-Title 头，有助于 OpenRouter 的速率限制和使用量跟踪。
 func addOpenRouterHeaders(req *http.Request, cfg *config.Config) {
 	if cfg.OpenRouterAppURL != "" {
 		req.Header.Set("HTTP-Referer", cfg.OpenRouterAppURL)
@@ -28,21 +27,20 @@ func addOpenRouterHeaders(req *http.Request, cfg *config.Config) {
 	}
 }
 
-// handleMessages is the main handler for /v1/messages endpoint.
-// It parses Claude requests, converts them to OpenAI format, and routes to either
-// streaming or non-streaming handlers based on the request's stream parameter.
+// handleMessages 是 /v1/messages 端点的主处理器。
+// 解析 Claude 请求，转换为 OpenAI 格式，并根据请求的 stream 参数路由到流式或非流式处理器。
 func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
-	// Debug: Log raw request
+	// 调试：记录原始请求
 	if cfg.Debug {
-		fmt.Printf("\n=== CLAUDE REQUEST ===\n%s\n===================\n", string(c.Body()))
+		fmt.Printf("\n=== Claude 请求 ===\n%s\n===================\n", string(c.Body()))
 	}
 
-	// Parse Claude request
+	// 解析 Claude 请求
 	var claudeReq models.ClaudeRequest
 	if err := c.BodyParser(&claudeReq); err != nil {
-		// Log the error and raw body for debugging
-		fmt.Printf("[ERROR] Failed to parse request body: %v\n", err)
-		fmt.Printf("[ERROR] Raw body: %s\n", string(c.Body()))
+		// 记录错误和原始请求体以便调试
+		fmt.Printf("[错误] 解析请求体失败: %v\n", err)
+		fmt.Printf("[错误] 原始请求体: %s\n", string(c.Body()))
 		return c.Status(400).JSON(fiber.Map{
 			"type": "error",
 			"error": fiber.Map{
@@ -52,7 +50,7 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	// Validate API key (if configured)
+	// 验证 API 密钥（如果已配置）
 	if cfg.AnthropicAPIKey != "" {
 		apiKey := c.Get("x-api-key")
 		if apiKey != cfg.AnthropicAPIKey {
@@ -60,13 +58,13 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 				"type": "error",
 				"error": fiber.Map{
 					"type":    "authentication_error",
-					"message": "Invalid API key",
+					"message": "API 密钥无效",
 				},
 			})
 		}
 	}
 
-	// Convert Claude request to OpenAI format
+	// 将 Claude 请求转换为 OpenAI 格式
 	openaiReq, err := converter.ConvertRequest(claudeReq, cfg)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{
@@ -78,104 +76,121 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	// 插入这段代码：强制修正 AI 的行为 (修复 Query 参数问题)
+	// 注入指令以防止模型使用无效的 "query" 参数
+	// 这对于通过 OpenAI 兼容 API 访问的 Claude 模型至关重要
 	if len(openaiReq.Messages) > 0 {
-		instruction := "\n\nIMPORTANT: When calling tools, you MUST use exact parameter names. NEVER use 'query' for tools like 'Edit' (use old_string/new_string), 'grep' (use pattern/path), or 'read' (use file_path)."
-		
-		// 如果第一条是系统消息，追加进去
+		instruction := `
+
+【关键工具参数要求】
+使用工具时，必须使用每个工具 schema 中定义的确切参数名称。任何工具都不存在 "query" 参数。
+
+各工具必需参数：
+- Edit: file_path, old_string, new_string（三个都必需）
+- Read: file_path（必需）
+- Write: file_path, content（两个都必需）
+- Bash: command（必需）
+- Grep: pattern（必需）
+- Glob: pattern（必需）
+- LSP: operation, filePath, line, character（全部必需）
+- Task: description, prompt, subagent_type（全部必需）
+- WebFetch: url, prompt（两个都必需）
+
+绝对不要使用 "query" 作为参数名称 - 这会导致工具执行失败。`
+
+		// 如果第一条消息是系统消息，则追加到其中
 		if openaiReq.Messages[0].Role == "system" {
-			// 使用类型断言将 interface{} 转为 string
+			// 将 interface{} 类型断言为 string
 			contentStr, _ := openaiReq.Messages[0].Content.(string)
 			openaiReq.Messages[0].Content = contentStr + instruction
 		} else {
-			// 否则在最前面插入一条系统消息
+			// 否则在前面添加新的系统消息
 			openaiReq.Messages = append([]models.OpenAIMessage{
 				{Role: "system", Content: instruction},
 			}, openaiReq.Messages...)
 		}
 	}
 
-	// Debug: Log converted OpenAI request
+	// 调试：记录转换后的 OpenAI 请求
 	if cfg.Debug {
 		openaiReqJSON, _ := json.MarshalIndent(openaiReq, "", "  ")
-		fmt.Printf("\n=== OPENAI REQUEST ===\n%s\n===================\n", string(openaiReqJSON))
+		fmt.Printf("\n=== OpenAI 请求 ===\n%s\n===================\n", string(openaiReqJSON))
 		if len(claudeReq.Tools) > 0 {
-			fmt.Printf("[DEBUG] Request has %d tools\n", len(claudeReq.Tools))
+			fmt.Printf("[调试] 请求包含 %d 个工具\n", len(claudeReq.Tools))
 			for i, tool := range openaiReq.Tools {
-				fmt.Printf("[DEBUG] Tool %d: %s\n", i, tool.Function.Name)
+				fmt.Printf("[调试] 工具 %d: %s\n", i, tool.Function.Name)
 			}
 		}
 	}
 
-	// Debug: Check Stream field
+	// 调试：检查 Stream 字段
 	if cfg.Debug {
 		if openaiReq.Stream == nil {
-			fmt.Printf("[DEBUG] Stream field is nil\n")
+			fmt.Printf("[调试] Stream 字段为 nil\n")
 		} else {
-			fmt.Printf("[DEBUG] Stream field = %v\n", *openaiReq.Stream)
+			fmt.Printf("[调试] Stream 字段 = %v\n", *openaiReq.Stream)
 		}
 	}
 
-	// Handle streaming vs non-streaming
+	// 处理流式与非流式请求
 	if openaiReq.Stream != nil && *openaiReq.Stream {
 		return handleStreamingMessages(c, openaiReq, cfg)
 	}
 
-	// Track timing for simple log
+	// 记录计时用于简单日志
 	startTime := time.Now()
 
-	// Non-streaming response
+	// 非流式响应
 	openaiResp, err := callOpenAI(openaiReq, cfg)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"type": "error",
 			"error": fiber.Map{
 				"type":    "api_error",
-				"message": fmt.Sprintf("OpenAI API error: %v", err),
+				"message": fmt.Sprintf("OpenAI API 错误: %v", err),
 			},
 		})
 	}
 
-	// Debug: Log OpenAI response
+	// 调试：记录 OpenAI 响应
 	if cfg.Debug {
 		openaiRespJSON, _ := json.MarshalIndent(openaiResp, "", "  ")
-		fmt.Printf("\n=== OPENAI RESPONSE ===\n%s\n====================\n", string(openaiRespJSON))
+		fmt.Printf("\n=== OpenAI 响应 ===\n%s\n====================\n", string(openaiRespJSON))
 		if len(openaiResp.Choices) > 0 {
 			choice := openaiResp.Choices[0]
-			fmt.Printf("[DEBUG] OpenAI response has %d tool_calls\n", len(choice.Message.ToolCalls))
+			fmt.Printf("[调试] OpenAI 响应包含 %d 个工具调用\n", len(choice.Message.ToolCalls))
 			for i, tc := range choice.Message.ToolCalls {
-				fmt.Printf("[DEBUG] ToolCall %d: ID=%s, Name=%s\n", i, tc.ID, tc.Function.Name)
+				fmt.Printf("[调试] 工具调用 %d: ID=%s, 名称=%s\n", i, tc.ID, tc.Function.Name)
 			}
 		}
 	}
 
-	// Convert OpenAI response to Claude format
+	// 将 OpenAI 响应转换为 Claude 格式
 	claudeResp, err := converter.ConvertResponse(openaiResp, claudeReq.Model)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"type": "error",
 			"error": fiber.Map{
 				"type":    "api_error",
-				"message": fmt.Sprintf("Response conversion error: %v", err),
+				"message": fmt.Sprintf("响应转换错误: %v", err),
 			},
 		})
 	}
 
-	// Debug: Log Claude response
+	// 调试：记录 Claude 响应
 	if cfg.Debug {
 		claudeRespJSON, _ := json.MarshalIndent(claudeResp, "", "  ")
-		fmt.Printf("\n=== CLAUDE RESPONSE ===\n%s\n====================\n\n", string(claudeRespJSON))
-		fmt.Printf("[DEBUG] Claude response has %d content blocks\n", len(claudeResp.Content))
+		fmt.Printf("\n=== Claude 响应 ===\n%s\n====================\n\n", string(claudeRespJSON))
+		fmt.Printf("[调试] Claude 响应包含 %d 个内容块\n", len(claudeResp.Content))
 		for i, block := range claudeResp.Content {
-			fmt.Printf("[DEBUG] Block %d: type=%s", i, block.Type)
+			fmt.Printf("[调试] 块 %d: 类型=%s", i, block.Type)
 			if block.Type == "tool_use" {
-				fmt.Printf(", name=%s, id=%s", block.Name, block.ID)
+				fmt.Printf(", 名称=%s, ID=%s", block.Name, block.ID)
 			}
 			fmt.Printf("\n")
 		}
 	}
 
-	// Simple log: one-line summary
+	// 简单日志：单行摘要
 	if cfg.SimpleLog {
 		duration := time.Since(startTime).Seconds()
 		tokensPerSec := 0.0
@@ -183,7 +198,7 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 			tokensPerSec = float64(claudeResp.Usage.OutputTokens) / duration
 		}
 		timestamp := time.Now().Format("15:04:05")
-		fmt.Printf("[%s] [REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+		fmt.Printf("[%s] [请求] %s 模型=%s 输入=%d 输出=%d 令牌/秒=%.1f\n",
 			timestamp,
 			cfg.OpenAIBaseURL,
 			openaiReq.Model,
@@ -192,12 +207,12 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 			tokensPerSec)
 	}
 
-	// 修复非流式模式下的参数
-	for _, block := range claudeResp.Content {
-		if block.Type == "tool_use" {
-			// 将 block.Input (可能是 interface{}) 转为 map
-			if args, ok := block.Input.(map[string]interface{}); ok {
-				block.Input = fixToolArguments(block.Name, args)
+	// 在非流式模式下清理工具参数（移除无效的 query 参数）
+	for i := range claudeResp.Content {
+		if claudeResp.Content[i].Type == "tool_use" {
+			// 将 block.Input 类型断言为 map 以进行清理
+			if args, ok := claudeResp.Content[i].Input.(map[string]interface{}); ok {
+				claudeResp.Content[i].Input = converter.SanitizeToolArgs(claudeResp.Content[i].Name, args)
 			}
 		}
 	}
@@ -205,14 +220,13 @@ func handleMessages(c *fiber.Ctx, cfg *config.Config) error {
 	return c.JSON(claudeResp)
 }
 
-// handleStreamingMessages handles streaming SSE responses from the provider.
-// It forwards the OpenAI request, receives streaming chunks, and converts them to
-// Claude's SSE event format in real-time using streamOpenAIToClaude.
+// handleStreamingMessages 处理来自提供商的流式 SSE 响应。
+// 转发 OpenAI 请求，接收流式数据块，并使用 streamOpenAIToClaude 实时转换为 Claude 的 SSE 事件格式。
 func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg *config.Config) error {
-	// Track timing for simple log
+	// 记录计时用于简单日志
 	startTime := time.Now()
 
-	// Set SSE headers
+	// 设置 SSE 头
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("Connection", "keep-alive")
@@ -220,67 +234,65 @@ func handleStreamingMessages(c *fiber.Ctx, openaiReq *models.OpenAIRequest, cfg 
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] StreamWriter: Starting\n")
+			fmt.Printf("[调试] 流写入器：开始\n")
 		}
 
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] StreamWriter: Making streaming request to %s\n", cfg.OpenAIBaseURL+"/chat/completions")
+			fmt.Printf("[调试] 流写入器：正在向 %s 发送流式请求\n", cfg.OpenAIBaseURL+"/chat/completions")
 		}
 
-		// Make streaming request with automatic retry logic
+		// 使用自动重试逻辑发送流式请求
 		resp, err := callOpenAIStream(openaiReq, cfg)
 		if err != nil {
 			if cfg.Debug {
-				fmt.Printf("[DEBUG] StreamWriter: Request failed: %v\n", err)
+				fmt.Printf("[调试] 流写入器：请求失败: %v\n", err)
 			}
-			writeSSEError(w, fmt.Sprintf("streaming request failed: %v", err))
+			writeSSEError(w, fmt.Sprintf("流式请求失败: %v", err))
 			return
 		}
 		defer func() { _ = resp.Body.Close() }()
 
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] StreamWriter: Got response, starting streamOpenAIToClaude conversion\n")
+			fmt.Printf("[调试] 流写入器：收到响应，开始 streamOpenAIToClaude 转换\n")
 		}
 
-		// Stream conversion
+		// 流式转换
 		streamOpenAIToClaude(w, resp.Body, openaiReq.Model, cfg, startTime)
 
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] StreamWriter: Completed\n")
+			fmt.Printf("[调试] 流写入器：完成\n")
 		}
 	})
 
 	return nil
 }
 
-// ToolCallState tracks the state of a tool call during streaming
+// ToolCallState 跟踪流式传输期间工具调用的状态
 type ToolCallState struct {
-	ID          string // Tool call ID from OpenAI
-	Name        string // Function name
-	ArgsBuffer  string // Accumulated JSON arguments
-	JSONSent    bool   // Flag if we sent the JSON delta
-	ClaudeIndex int    // The content block index for Claude
-	Started     bool   // Flag if content_block_start was sent
+	ID          string // 来自 OpenAI 的工具调用 ID
+	Name        string // 函数名称
+	ArgsBuffer  string // 累积的 JSON 参数
+	JSONSent    bool   // 是否已发送 JSON delta 的标志
+	ClaudeIndex int    // Claude 的内容块索引
+	Started     bool   // 是否已发送 content_block_start 的标志
 }
 
-// streamOpenAIToClaude converts OpenAI streaming responses to Claude's SSE event format.
+// streamOpenAIToClaude 将 OpenAI 流式响应转换为 Claude 的 SSE 事件格式。
 func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel string, cfg *config.Config, startTime time.Time) {
 	if cfg.Debug {
-		fmt.Printf("[DEBUG] streamOpenAIToClaude: Starting conversion\n")
+		fmt.Printf("[调试] streamOpenAIToClaude：开始转换\n")
 	}
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // Increase buffer size
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 增加缓冲区大小
 
-	// State variables
+	// 状态变量
 	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
-	
-	// -------------------------------------------------------------
-	// 修复重点：使用动态自增索引，防止索引不连续导致的循环输出 BUG
-	// -------------------------------------------------------------
-	nextIndex := 0 
-	textBlockIndex := -1      // 初始化为 -1，表示未分配
-	thinkingBlockIndex := -1  // 初始化为 -1，表示未分配
-	
+
+	// 使用动态自增索引防止索引不连续问题
+	nextIndex := 0
+	textBlockIndex := -1     // -1 表示尚未分配
+	thinkingBlockIndex := -1 // -1 表示尚未分配
+
 	currentToolCalls := make(map[int]*ToolCallState)
 	finalStopReason := "end_turn"
 	usageData := map[string]interface{}{
@@ -294,12 +306,12 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		},
 	}
 
-	// Thinking block tracking (to show thinking indicator in Claude Code)
+	// 思考块跟踪（用于在 Claude Code 中显示思考指示器）
 	thinkingBlockStarted := false
 	thinkingBlockHasContent := false
-	textBlockStarted := false // Track if we've sent text block_start
+	textBlockStarted := false // 跟踪是否已发送文本块的 block_start
 
-	// Send initial SSE events
+	// 发送初始 SSE 事件
 	writeSSEEvent(w, "message_start", map[string]interface{}{
 		"type": "message_start",
 		"message": map[string]interface{}{
@@ -329,21 +341,21 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 	_ = w.Flush()
 
-	// Process streaming chunks
+	// 处理流式数据块
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Skip empty lines and comments
+		// 跳过空行和注释
 		if line == "" || strings.HasPrefix(line, ":") {
 			continue
 		}
 
-		// Check for [DONE] marker
+		// 检查 [DONE] 标记
 		if strings.Contains(line, "[DONE]") {
 			break
 		}
 
-		// Parse data line
+		// 解析数据行
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -355,19 +367,19 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			continue
 		}
 
-		// Log every chunk to see what OpenRouter is sending
+		// 记录每个数据块以查看 OpenRouter 发送的内容
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] Raw chunk from OpenRouter: %s\n", dataJSON)
+			fmt.Printf("[调试] 来自 OpenRouter 的原始数据块: %s\n", dataJSON)
 		}
 
-		// Handle usage data
+		// 处理使用量数据
 		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
 			if cfg.Debug {
 				usageJSON, _ := json.Marshal(usage)
-				fmt.Printf("[DEBUG] Received usage from OpenAI: %s\n", string(usageJSON))
+				fmt.Printf("[调试] 收到来自 OpenAI 的使用量: %s\n", string(usageJSON))
 			}
 
-			// Convert float64 to int for token counts (JSON unmarshals numbers as float64)
+			// 将 float64 转换为 int（JSON 将数字解析为 float64）
 			inputTokens := 0
 			outputTokens := 0
 			if val, ok := usage["prompt_tokens"].(float64); ok {
@@ -382,7 +394,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				"output_tokens": outputTokens,
 			}
 
-			// Add cache metrics if present
+			// 如果存在缓存指标则添加
 			if promptTokensDetails, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
 				if cachedTokens, ok := promptTokensDetails["cached_tokens"].(float64); ok && cachedTokens > 0 {
 					usageData["cache_read_input_tokens"] = int(cachedTokens)
@@ -390,11 +402,11 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			}
 			if cfg.Debug {
 				usageDataJSON, _ := json.Marshal(usageData)
-				fmt.Printf("[DEBUG] Accumulated usageData: %s\n", string(usageDataJSON))
+				fmt.Printf("[调试] 累积的使用量数据: %s\n", string(usageDataJSON))
 			}
 		}
 
-		// Extract delta from choices
+		// 从 choices 中提取 delta
 		choices, ok := chunk["choices"].([]interface{})
 		if !ok || len(choices) == 0 {
 			continue
@@ -406,48 +418,48 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			continue
 		}
 
-		// Handle reasoning delta (thinking blocks)
-		// Support both OpenRouter and OpenAI formats:
-		// - OpenRouter: delta.reasoning_details (array)
-		// - OpenAI o1/o3: delta.reasoning_content (string)
+		// 处理推理 delta（思考块）
+		// 支持 OpenRouter 和 OpenAI 两种格式：
+		// - OpenRouter: delta.reasoning_details（数组）
+		// - OpenAI o1/o3: delta.reasoning_content（字符串）
 
-		// First, check for OpenAI's reasoning_content format (o1/o3 models)
+		// 首先检查 OpenAI 的 reasoning_content 格式（o1/o3 模型）
 		if reasoningContent, ok := delta["reasoning_content"].(string); ok && reasoningContent != "" {
-			// Send content_block_start for thinking block on first thinking delta
+			// 在第一个思考 delta 时发送思考块的 content_block_start
 			if !thinkingBlockStarted {
-				thinkingBlockIndex = nextIndex // 使用动态索引
+				thinkingBlockIndex = nextIndex
 				nextIndex++
-				
+
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
 					"type":  "content_block_start",
 					"index": thinkingBlockIndex,
 					"content_block": map[string]interface{}{
-						"type": "thinking",
-						"thinking": "", // <-- 防止思维链校验失败
+						"type":     "thinking",
+						"thinking": "", // 必需，防止思考块验证失败
 					},
 				})
 				thinkingBlockStarted = true
 				thinkingBlockHasContent = true
 			}
 
-			// Send thinking delta
+			// 发送思考 delta
 			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 				"type":  "content_block_delta",
 				"index": thinkingBlockIndex,
 				"delta": map[string]interface{}{
-					"type": "thinking_delta",
+					"type":     "thinking_delta",
 					"thinking": reasoningContent,
 				},
 			})
 		}
 
-		// Then, check for OpenRouter's reasoning_details format
-		// Only process reasoning_details if we haven't already processed reasoning field
+		// 然后检查 OpenRouter 的 reasoning_details 格式
+		// 仅在尚未处理 reasoning 字段时处理 reasoning_details
 		if reasoningDetailsRaw, ok := delta["reasoning_details"]; ok && delta["reasoning"] == nil {
 			if reasoningDetails, ok := reasoningDetailsRaw.([]interface{}); ok && len(reasoningDetails) > 0 {
 				for _, detailRaw := range reasoningDetails {
 					if detail, ok := detailRaw.(map[string]interface{}); ok {
-						// Extract reasoning text from the detail
+						// 从详情中提取推理文本
 						thinkingText := ""
 						detailType, _ := detail["type"].(string)
 
@@ -461,14 +473,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 								thinkingText = summary
 							}
 						case "reasoning.encrypted":
-							// Skip encrypted/redacted reasoning in streaming
+							// 在流式传输中跳过加密/编辑的推理
 							continue
 						}
 
 						if thinkingText != "" {
-							// Send content_block_start for thinking block on first thinking delta
+							// 在第一个思考 delta 时发送思考块的 content_block_start
 							if !thinkingBlockStarted {
-								thinkingBlockIndex = nextIndex // 使用动态索引
+								thinkingBlockIndex = nextIndex
 								nextIndex++
 
 								writeSSEEvent(w, "content_block_start", map[string]interface{}{
@@ -483,7 +495,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 								_ = w.Flush()
 							}
 
-							// Send thinking block delta
+							// 发送思考块 delta
 							writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 								"type":  "content_block_delta",
 								"index": thinkingBlockIndex,
@@ -500,11 +512,11 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			}
 		}
 
-		// Handle reasoning field directly (simpler format from some models)
+		// 直接处理 reasoning 字段（某些模型的简化格式）
 		if reasoning, ok := delta["reasoning"].(string); ok && reasoning != "" {
-			// Send content_block_start for thinking block on first thinking delta
+			// 在第一个思考 delta 时发送思考块的 content_block_start
 			if !thinkingBlockStarted {
-				thinkingBlockIndex = nextIndex // 使用动态索引
+				thinkingBlockIndex = nextIndex
 				nextIndex++
 
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
@@ -519,7 +531,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				_ = w.Flush()
 			}
 
-			// Send thinking block delta
+			// 发送思考块 delta
 			writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 				"type":  "content_block_delta",
 				"index": thinkingBlockIndex,
@@ -532,11 +544,11 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			_ = w.Flush()
 		}
 
-		// Handle text delta
+		// 处理文本 delta
 		if content, ok := delta["content"].(string); ok && content != "" {
-			// Send content_block_start for text block on first text delta
+			// 在第一个文本 delta 时发送文本块的 content_block_start
 			if !textBlockStarted {
-				textBlockIndex = nextIndex // 使用动态索引
+				textBlockIndex = nextIndex
 				nextIndex++
 
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
@@ -562,12 +574,12 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			_ = w.Flush()
 		}
 
-		// Handle tool call deltas
+		// 处理工具调用 delta
 		if toolCallsRaw, ok := delta["tool_calls"]; ok {
-			// Debug: Log raw tool_calls from provider
+			// 调试：记录来自提供商的原始 tool_calls
 			if cfg.Debug {
 				toolCallsJSON, _ := json.Marshal(toolCallsRaw)
-				fmt.Printf("[DEBUG] Raw tool_calls delta: %s\n", string(toolCallsJSON))
+				fmt.Printf("[调试] 原始 tool_calls delta: %s\n", string(toolCallsJSON))
 			}
 
 			toolCalls, ok := toolCallsRaw.([]interface{})
@@ -578,13 +590,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 						continue
 					}
 
-					// Get tool call index
+					// 获取工具调用索引
 					tcIndex := 0
 					if idx, ok := tcDelta["index"].(float64); ok {
 						tcIndex = int(idx)
 					}
 
-					// Initialize tool call tracking if not exists
+					// 如果不存在则初始化工具调用跟踪
 					if _, exists := currentToolCalls[tcIndex]; !exists {
 						currentToolCalls[tcIndex] = &ToolCallState{
 							ID:          "",
@@ -598,17 +610,14 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 					toolCall := currentToolCalls[tcIndex]
 
-					// Update tool call ID if provided
+					// 如果提供了工具调用 ID 则更新
 					if id, ok := tcDelta["id"].(string); ok {
 						toolCall.ID = id
 					}
 
-					// -----------------------------------------------------------------
-					// 修复重点：如果准备开始发送工具块，但还没发送过文本块，
-					// 强制补齐一个 text 块，并使用动态索引
-					// -----------------------------------------------------------------
+					// 如果没有启动文本块，在工具块之前创建占位符
 					if !textBlockStarted {
-						textBlockIndex = nextIndex // 使用动态索引
+						textBlockIndex = nextIndex
 						nextIndex++
 
 						writeSSEEvent(w, "content_block_start", map[string]interface{}{
@@ -619,28 +628,27 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 								"text": "",
 							},
 						})
-						// 补齐一段话，防止 Claude Code 报 (no content)
+						// 发送占位文本，防止出现 "(no content)" 错误
 						writeSSEEvent(w, "content_block_delta", map[string]interface{}{
 							"type":  "content_block_delta",
 							"index": textBlockIndex,
 							"delta": map[string]interface{}{
 								"type": "text_delta",
-								"text": "Using tool:", // 简单的占位符
+								"text": "正在调用工具：",
 							},
 						})
 						textBlockStarted = true
 						_ = w.Flush()
 					}
 
-					// Update function name
+					// 更新函数名称
 					if functionData, ok := tcDelta["function"].(map[string]interface{}); ok {
 						if name, ok := functionData["name"].(string); ok {
 							toolCall.Name = name
 						}
 
-						// Start content block when we have complete initial data
+						// 当有完整的初始数据时启动内容块
 						if toolCall.ID != "" && toolCall.Name != "" && !toolCall.Started {
-							// 使用动态索引
 							toolCall.ClaudeIndex = nextIndex
 							nextIndex++
 							toolCall.Started = true
@@ -658,42 +666,20 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 							_ = w.Flush()
 						}
 
-						// Handle function arguments
-						// Type assertion handles nil check, Started flag, and we process even empty strings
+						// 处理函数参数
+						// 仅在此处累积参数 - 在流结束时发送完整的 JSON
 						if args, ok := functionData["arguments"].(string); ok && toolCall.Started {
-							// Only accumulate if args is not empty
 							if args != "" {
 								toolCall.ArgsBuffer += args
 							}
-
-							// Try to parse complete JSON and send delta when we have valid JSON
-							if toolCall.ArgsBuffer != "" {
-								var jsonTest interface{}
-								if err := json.Unmarshal([]byte(toolCall.ArgsBuffer), &jsonTest); err == nil {
-									// If parsing succeeds and we haven't sent this JSON yet
-									if !toolCall.JSONSent {
-										writeSSEEvent(w, "content_block_delta", map[string]interface{}{
-											"type":  "content_block_delta",
-											"index": toolCall.ClaudeIndex,
-											"delta": map[string]interface{}{
-												"type":         "input_json_delta",
-												"partial_json": toolCall.ArgsBuffer,
-											},
-										})
-										_ = w.Flush()
-										toolCall.JSONSent = true
-									}
-								}
-							}
-							// If JSON is incomplete, continue accumulating (no action needed)
 						}
 					}
 				}
 			}
 		}
 
-		// Handle finish reason
-		// NOTE: Don't break here - with stream_options.include_usage, OpenAI sends usage in a chunk AFTER finish_reason
+		// 处理完成原因
+		// 注意：不要在此处中断 - 使用 stream_options.include_usage 时，OpenAI 会在 finish_reason 之后的数据块中发送使用量
 		if finishReason, ok := choice["finish_reason"].(string); ok && finishReason != "" {
 			switch finishReason {
 			case "length":
@@ -705,13 +691,13 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			default:
 				finalStopReason = "end_turn"
 			}
-			// Continue processing to capture usage chunk (don't break)
+			// 继续处理以捕获使用量数据块（不中断）
 		}
 	}
 
-	// Send final SSE events
+	// 发送最终 SSE 事件
 
-	// Send content_block_stop for text block if it was started
+	// 如果文本块已启动，发送 content_block_stop
 	if textBlockStarted && textBlockIndex != -1 {
 		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 			"type":  "content_block_stop",
@@ -720,10 +706,30 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		_ = w.Flush()
 	}
 
-	// Send content_block_stop for each tool call
+	// 为每个工具调用发送最终 JSON 和 content_block_stop
 	for _, toolData := range currentToolCalls {
-		// Check both Started AND claude_index is not None
+		// 检查 Started 和 claude_index 是否有效
 		if toolData.Started && toolData.ClaudeIndex != -1 {
+			// 在关闭块之前发送完整的 JSON 参数
+			if toolData.ArgsBuffer != "" {
+				var jsonArgs map[string]interface{}
+				if err := json.Unmarshal([]byte(toolData.ArgsBuffer), &jsonArgs); err == nil {
+					// 清理工具参数（移除无效的 query 参数）
+					sanitizedArgs := converter.SanitizeToolArgs(toolData.Name, jsonArgs)
+					sanitizedJSON, _ := json.Marshal(sanitizedArgs)
+
+					writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+						"type":  "content_block_delta",
+						"index": toolData.ClaudeIndex,
+						"delta": map[string]interface{}{
+							"type":         "input_json_delta",
+							"partial_json": string(sanitizedJSON),
+						},
+					})
+					_ = w.Flush()
+				}
+			}
+
 			writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 				"type":  "content_block_stop",
 				"index": toolData.ClaudeIndex,
@@ -732,7 +738,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		}
 	}
 
-	// Send content_block_stop for thinking block if it had content
+	// 如果思考块有内容，发送 content_block_stop
 	if thinkingBlockStarted && thinkingBlockHasContent && thinkingBlockIndex != -1 {
 		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
 			"type":  "content_block_stop",
@@ -741,20 +747,20 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		_ = w.Flush()
 	}
 
-	// Debug: Check if usage data was received
+	// 调试：检查是否收到使用量数据
 	if cfg.Debug {
 		inputTokens, _ := usageData["input_tokens"].(int)
 		outputTokens, _ := usageData["output_tokens"].(int)
 		if inputTokens == 0 && outputTokens == 0 {
-			fmt.Printf("[DEBUG] OpenRouter streaming: Usage data unavailable (expected limitation of streaming API)\n")
+			fmt.Printf("[调试] OpenRouter 流式传输：使用量数据不可用（流式 API 的预期限制）\n")
 		}
 	}
 
-	// Send message_delta with stop_reason and accumulated usage data
-	// NOTE: We send the actual accumulated usage to fix the "0 tokens" issue in Claude Code
+	// 发送带有 stop_reason 和累积使用量数据的 message_delta
+	// 注意：我们发送实际累积的使用量以修复 Claude Code 中的 "0 tokens" 问题
 	if cfg.Debug {
 		usageDataJSON, _ := json.Marshal(usageData)
-		fmt.Printf("[DEBUG] Sending message_delta with usageData: %s\n", string(usageDataJSON))
+		fmt.Printf("[调试] 发送带有使用量数据的 message_delta: %s\n", string(usageDataJSON))
 	}
 	writeSSEEvent(w, "message_delta", map[string]interface{}{
 		"type": "message_delta",
@@ -766,18 +772,18 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	})
 	_ = w.Flush()
 
-	// Send message_stop
+	// 发送 message_stop
 	writeSSEEvent(w, "message_stop", map[string]interface{}{
 		"type": "message_stop",
 	})
 	_ = w.Flush()
 
-	// Simple log: one-line summary
+	// 简单日志：单行摘要
 	if cfg.SimpleLog {
 		inputTokens := 0
 		outputTokens := 0
 
-		// Try to extract tokens from various possible formats
+		// 尝试从各种可能的格式中提取令牌数
 		if val, ok := usageData["input_tokens"].(int); ok {
 			inputTokens = val
 		} else if val, ok := usageData["input_tokens"].(float64); ok {
@@ -790,12 +796,12 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			outputTokens = int(val)
 		}
 
-		// Debug: show what we actually have in usageData
+		// 调试：显示 usageData 中的实际内容
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] usageData: %+v\n", usageData)
+			fmt.Printf("[调试] 使用量数据: %+v\n", usageData)
 		}
 
-		// Calculate tokens per second
+		// 计算每秒令牌数
 		duration := time.Since(startTime).Seconds()
 		tokensPerSec := 0.0
 		if duration > 0 && outputTokens > 0 {
@@ -803,7 +809,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		}
 
 		timestamp := time.Now().Format("15:04:05")
-		fmt.Printf("[%s] [REQ] %s model=%s in=%d out=%d tok/s=%.1f\n",
+		fmt.Printf("[%s] [请求] %s 模型=%s 输入=%d 输出=%d 令牌/秒=%.1f\n",
 			timestamp,
 			cfg.OpenAIBaseURL,
 			providerModel,
@@ -812,20 +818,20 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 			tokensPerSec)
 	}
 
-	// Check for scanner errors
+	// 检查扫描器错误
 	if err := scanner.Err(); err != nil {
-		writeSSEError(w, fmt.Sprintf("stream read error: %v", err))
+		writeSSEError(w, fmt.Sprintf("流读取错误: %v", err))
 	}
 }
 
-// writeSSEEvent writes a Server-Sent Event
+// writeSSEEvent 写入服务器发送事件
 func writeSSEEvent(w *bufio.Writer, event string, data interface{}) {
 	dataJSON, _ := json.Marshal(data)
 	_, _ = fmt.Fprintf(w, "event: %s\n", event)
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", string(dataJSON))
 }
 
-// writeSSEError writes an error event
+// writeSSEError 写入错误事件
 func writeSSEError(w *bufio.Writer, message string) {
 	writeSSEEvent(w, "error", map[string]interface{}{
 		"type": "error",
@@ -837,26 +843,26 @@ func writeSSEError(w *bufio.Writer, message string) {
 	_ = w.Flush()
 }
 
-// callOpenAI makes an HTTP request to the OpenAI API with automatic retry logic
-// for max_completion_tokens parameter errors. Uses per-model capability caching.
+// callOpenAI 向 OpenAI API 发送 HTTP 请求，带有自动重试逻辑
+// 用于处理 max_completion_tokens 参数错误。使用按模型的能力缓存。
 func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIResponse, error) {
-	// Try the request with the configured parameters
+	// 使用配置的参数尝试请求
 	resp, err := callOpenAIInternal(req, cfg)
 	if err != nil {
-		// Check if this is a max_tokens parameter error
+		// 检查是否是 max_tokens 参数错误
 		if isMaxTokensParameterError(err.Error()) {
 			if cfg.Debug {
-				fmt.Printf("[DEBUG] Detected max_completion_tokens parameter error for model %s, retrying without it\n", req.Model)
+				fmt.Printf("[调试] 检测到模型 %s 的 max_completion_tokens 参数错误，正在重试\n", req.Model)
 			}
-			// Retry without max_completion_tokens and cache the capability per model
+			// 不使用 max_completion_tokens 重试，并按模型缓存能力
 			return retryWithoutMaxCompletionTokens(req, cfg)
 		}
-		// Other errors - return as-is
+		// 其他错误 - 原样返回
 		return nil, err
 	}
 
-	// Success on first try - cache that this (provider, model) supports max_completion_tokens
-	// Only cache if we actually sent max_completion_tokens
+	// 首次尝试成功 - 缓存此（提供商，模型）支持 max_completion_tokens
+	// 仅在实际发送了 max_completion_tokens 时缓存
 	if req.MaxCompletionTokens > 0 {
 		cacheKey := config.CacheKey{
 			BaseURL: cfg.OpenAIBaseURL,
@@ -866,30 +872,30 @@ func callOpenAI(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIRe
 			UsesMaxCompletionTokens: true,
 		})
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] Cached: model %s supports max_completion_tokens\n", req.Model)
+			fmt.Printf("[调试] 已缓存：模型 %s 支持 max_completion_tokens\n", req.Model)
 		}
 	}
 
 	return resp, nil
 }
 
-// callOpenAIStream makes a streaming HTTP request with retry logic for parameter errors.
-// Uses per-model capability caching.
+// callOpenAIStream 发送流式 HTTP 请求，带有参数错误重试逻辑。
+// 使用按模型的能力缓存。
 func callOpenAIStream(req *models.OpenAIRequest, cfg *config.Config) (*http.Response, error) {
-	// Try with configured parameters
+	// 使用配置的参数尝试
 	resp, err := callOpenAIStreamInternal(req, cfg)
 	if err != nil {
-		// Check if this is a max_tokens parameter error
+		// 检查是否是 max_tokens 参数错误
 		if isMaxTokensParameterError(err.Error()) {
 			if cfg.Debug {
-				fmt.Printf("[DEBUG] Detected max_completion_tokens parameter error in stream for model %s, retrying without it\n", req.Model)
+				fmt.Printf("[调试] 检测到流式模型 %s 的 max_completion_tokens 参数错误，正在重试\n", req.Model)
 			}
-			// Create retry request without max tokens
+			// 创建不带 max tokens 的重试请求
 			retryReq := *req
 			retryReq.MaxCompletionTokens = 0
 			retryReq.MaxTokens = 0
 
-			// Cache that this (provider, model) doesn't support max_completion_tokens
+			// 缓存此（提供商，模型）不支持 max_completion_tokens
 			cacheKey := config.CacheKey{
 				BaseURL: cfg.OpenAIBaseURL,
 				Model:   req.Model,
@@ -903,7 +909,7 @@ func callOpenAIStream(req *models.OpenAIRequest, cfg *config.Config) (*http.Resp
 		return nil, err
 	}
 
-	// Success - cache capability if we sent max_completion_tokens
+	// 成功 - 如果发送了 max_completion_tokens 则缓存能力
 	if req.MaxCompletionTokens > 0 {
 		cacheKey := config.CacheKey{
 			BaseURL: cfg.OpenAIBaseURL,
@@ -913,97 +919,97 @@ func callOpenAIStream(req *models.OpenAIRequest, cfg *config.Config) (*http.Resp
 			UsesMaxCompletionTokens: true,
 		})
 		if cfg.Debug {
-			fmt.Printf("[DEBUG] Cached: model %s supports max_completion_tokens (streaming)\n", req.Model)
+			fmt.Printf("[调试] 已缓存：模型 %s 支持 max_completion_tokens（流式）\n", req.Model)
 		}
 	}
 
 	return resp, nil
 }
 
-// callOpenAIStreamInternal makes a streaming HTTP request without retry logic
+// callOpenAIStreamInternal 发送流式 HTTP 请求，不带重试逻辑
 func callOpenAIStreamInternal(req *models.OpenAIRequest, cfg *config.Config) (*http.Response, error) {
-	// Marshal request to JSON
+	// 将请求序列化为 JSON
 	reqBody, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// Build API URL
+	// 构建 API URL
 	apiURL := cfg.OpenAIBaseURL + "/chat/completions"
 
-	// Create HTTP request
+	// 创建 HTTP 请求
 	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// Set headers
+	// 设置请求头
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Skip auth for Ollama (localhost)
+	// 跳过 Ollama（localhost）的认证
 	if !cfg.IsLocalhost() {
 		httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 	}
 
-	// OpenRouter-specific headers
+	// OpenRouter 特定的请求头
 	if cfg.DetectProvider() == config.ProviderOpenRouter {
 		addOpenRouterHeaders(httpReq, cfg)
 	}
 
-	// Create HTTP client with longer timeout for streaming
+	// 创建带有较长超时的 HTTP 客户端用于流式传输
 	client := &http.Client{
 		Timeout: 300 * time.Second,
 	}
 
-	// Make request
+	// 发送请求
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 
-	// Check for errors
+	// 检查错误
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("OpenAI API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("OpenAI API 返回状态码 %d: %s", resp.StatusCode, string(body))
 	}
 
 	return resp, nil
 }
 
-// isMaxTokensParameterError checks if the error message indicates an unsupported
-// max_tokens or max_completion_tokens parameter issue.
-// Uses broad keyword matching to handle different error message formats across providers.
-// No status code checking - relies on message content alone.
+// isMaxTokensParameterError 检查错误消息是否表示不支持的
+// max_tokens 或 max_completion_tokens 参数问题。
+// 使用广泛的关键字匹配来处理不同提供商的不同错误消息格式。
+// 不检查状态码 - 仅依赖消息内容。
 func isMaxTokensParameterError(errorMessage string) bool {
 	errorLower := strings.ToLower(errorMessage)
 
-	// Check for parameter error indicators
+	// 检查参数错误指示器
 	hasParamIndicator := strings.Contains(errorLower, "parameter") ||
 		strings.Contains(errorLower, "unsupported") ||
 		strings.Contains(errorLower, "invalid")
 
-	// Check for our specific parameter names
+	// 检查我们特定的参数名称
 	hasOurParam := strings.Contains(errorLower, "max_tokens") ||
 		strings.Contains(errorLower, "max_completion_tokens")
 
-	// Require both indicators to reduce false positives
+	// 需要两个指示器都存在以减少误报
 	return hasParamIndicator && hasOurParam
 }
 
-// retryWithoutMaxCompletionTokens attempts the request again without max_completion_tokens.
-// Caches the result per (provider, model) combination for future requests.
+// retryWithoutMaxCompletionTokens 尝试不使用 max_completion_tokens 重新发送请求。
+// 按（提供商，模型）组合缓存结果以供将来请求使用。
 func retryWithoutMaxCompletionTokens(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIResponse, error) {
-	// Create a copy of the request without max_completion_tokens
+	// 创建不带 max_completion_tokens 的请求副本
 	retryReq := *req
 	retryReq.MaxCompletionTokens = 0
-	retryReq.MaxTokens = 0 // Also clear max_tokens to avoid issues
+	retryReq.MaxTokens = 0 // 同时清除 max_tokens 以避免问题
 
 	if cfg.Debug {
-		fmt.Printf("[DEBUG] Retrying without max_completion_tokens/max_tokens for model: %s\n", req.Model)
+		fmt.Printf("[调试] 正在为模型 %s 重试，不使用 max_completion_tokens/max_tokens\n", req.Model)
 	}
 
-	// Cache that this specific (provider, model) doesn't support max_completion_tokens
+	// 缓存此特定（提供商，模型）不支持 max_completion_tokens
 	cacheKey := config.CacheKey{
 		BaseURL: cfg.OpenAIBaseURL,
 		Model:   req.Model,
@@ -1012,121 +1018,76 @@ func retryWithoutMaxCompletionTokens(req *models.OpenAIRequest, cfg *config.Conf
 		UsesMaxCompletionTokens: false,
 	})
 
-	// Make the retry request
+	// 发送重试请求
 	return callOpenAIInternal(&retryReq, cfg)
 }
 
-// callOpenAIInternal is the internal implementation without retry logic
+// callOpenAIInternal 是不带重试逻辑的内部实现
 func callOpenAIInternal(req *models.OpenAIRequest, cfg *config.Config) (*models.OpenAIResponse, error) {
-	// Marshal request to JSON
+	// 将请求序列化为 JSON
 	reqBody, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// Build API URL
+	// 构建 API URL
 	apiURL := cfg.OpenAIBaseURL + "/chat/completions"
 
-	// Create HTTP request
+	// 创建 HTTP 请求
 	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	// Set headers
+	// 设置请求头
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	// Skip auth for Ollama (localhost) - Ollama doesn't require authentication
+	// 跳过 Ollama（localhost）的认证 - Ollama 不需要认证
 	if !cfg.IsLocalhost() {
 		httpReq.Header.Set("Authorization", "Bearer "+cfg.OpenAIAPIKey)
 	}
 
-	// OpenRouter-specific headers for better rate limits
+	// OpenRouter 特定的请求头以获得更好的速率限制
 	if cfg.DetectProvider() == config.ProviderOpenRouter {
 		addOpenRouterHeaders(httpReq, cfg)
 	}
 
-	// Create HTTP client with timeout
+	// 创建带超时的 HTTP 客户端
 	client := &http.Client{
 		Timeout: 90 * time.Second,
 	}
 
-	// Make request
+	// 发送请求
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("请求失败: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Read response body
+	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
-	// Check for errors
+	// 检查错误
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenAI API returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("OpenAI API 返回状态码 %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse response
+	// 解析响应
 	var openaiResp models.OpenAIResponse
 	if err := json.Unmarshal(respBody, &openaiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	return &openaiResp, nil
 }
 
 func handleCountTokens(c *fiber.Ctx, cfg *config.Config) error {
-	// Simple token counting endpoint
+	// 简单的令牌计数端点
 	return c.JSON(fiber.Map{
 		"input_tokens": 100,
 	})
 }
 
-//修复函数，防止模型擅自使用 query
-func fixToolArguments(toolName string, args map[string]interface{}) map[string]interface{} {
-	// 统一转为小写进行模糊匹配
-	loweredName := strings.ToLower(toolName)
-	
-	// 查找任何形式的 query 参数
-	var queryContent string
-	var queryKey string
-	for k, v := range args {
-		if strings.ToLower(k) == "query" {
-			if s, ok := v.(string); ok {
-				queryContent = s
-				queryKey = k
-				break
-			}
-		}
-	}
-
-	if queryKey == "" {
-		return args
-	}
-
-	// 根据工具类型分发参数
-	switch {
-	case strings.Contains(loweredName, "edit"):
-		if _, ok := args["old_string"]; !ok { args["old_string"] = queryContent }
-	case strings.Contains(loweredName, "grep"):
-		if _, ok := args["pattern"]; !ok { args["pattern"] = queryContent }
-		if _, ok := args["path"]; !ok { args["path"] = "." }
-	case strings.Contains(loweredName, "read"):
-		if _, ok := args["file_path"]; !ok { args["file_path"] = queryContent }
-	case strings.Contains(loweredName, "write"):
-		if _, ok := args["file_path"]; !ok { args["file_path"] = queryContent }
-	case strings.Contains(loweredName, "bash"):
-		if _, ok := args["command"]; !ok { args["command"] = queryContent }
-	case strings.Contains(loweredName, "task"), strings.Contains(loweredName, "todo"):
-		// 对于任务类工具，如果 AI 输出了 query，通常其实是想表达 content 或 note
-		if _, ok := args["content"]; !ok { args["content"] = queryContent }
-		if _, ok := args["note"]; !ok { args["note"] = queryContent }
-	}
-
-	// 删掉万恶之源 query
-	delete(args, queryKey)
-	return args
-}
