@@ -401,6 +401,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					"index": thinkingBlockIndex,
 					"content_block": map[string]interface{}{
 						"type": "thinking",
+						"thinking": "",
 					},
 				})
 				thinkingBlockStarted = true
@@ -413,7 +414,7 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				"index": thinkingBlockIndex,
 				"delta": map[string]interface{}{
 					"type": "thinking_delta",
-					"text": reasoningContent,
+					"thinking": reasoningContent,
 				},
 			})
 		}
