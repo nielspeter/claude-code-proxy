@@ -372,8 +372,9 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 				thinkingText := extractReasoningText(detailMap)
 				if thinkingText != "" {
 					contentBlocks = append(contentBlocks, models.ContentBlock{
-						Type:     "thinking",
-						Thinking: thinkingText, // Use Thinking field, not Text
+						Type:      "thinking",
+						Thinking:  thinkingText,
+						Signature: "", // Required for Claude Code to hide/show thinking
 					})
 				}
 			}
@@ -382,11 +383,41 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 
 	// Handle text content
 	if choice.Message.Content != nil {
+		// Handle string content
 		if contentStr, ok := choice.Message.Content.(string); ok && contentStr != "" {
 			contentBlocks = append(contentBlocks, models.ContentBlock{
 				Type: "text",
 				Text: contentStr,
 			})
+		}
+
+		// Handle array content (native Claude format from some providers)
+		// Some OpenAI-compatible APIs may directly return Claude-style content blocks
+		if contentArr, ok := choice.Message.Content.([]interface{}); ok {
+			for _, block := range contentArr {
+				if blockMap, ok := block.(map[string]interface{}); ok {
+					blockType, _ := blockMap["type"].(string)
+					switch blockType {
+					case "thinking":
+						// Native Claude thinking block
+						if thinking, ok := blockMap["thinking"].(string); ok {
+							contentBlocks = append(contentBlocks, models.ContentBlock{
+								Type:      "thinking",
+								Thinking:  thinking,
+								Signature: "", // Required for Claude Code
+							})
+						}
+					case "text":
+						// Native Claude text block
+						if text, ok := blockMap["text"].(string); ok {
+							contentBlocks = append(contentBlocks, models.ContentBlock{
+								Type: "text",
+								Text: text,
+							})
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -396,7 +427,7 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 			Type:  "tool_use",
 			ID:    toolCall.ID,
 			Name:  toolCall.Function.Name,
-			Input: toolCall.Function.Arguments, // OpenAI sends as JSON string
+			Input: sanitizeToolInput(toolCall.Function.Name, toolCall.Function.Arguments),
 		})
 	}
 
@@ -438,4 +469,59 @@ func convertFinishReason(openaiReason string) string {
 	default:
 		return "end_turn"
 	}
+}
+
+// sanitizeToolInput fixes common model errors where parameters are malformed.
+// Specifically handles the issue where "query" parameter is halluncinated instead of
+// the correct required parameters (file_path, command, pattern, etc.).
+func sanitizeToolInput(toolName string, argsJSON string) interface{} {
+	var input map[string]interface{}
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		// If it's not a JSON object, return as is (likely a string or primitive)
+		return argsJSON
+	}
+
+	// Check if 'query' exists and is an unexpected parameter
+	if queryVal, hasQuery := input["query"]; hasQuery {
+		// Remove 'query' - it's never a valid parameter for these tools
+		delete(input, "query")
+
+		// If we have a query string, try to rescue it by mapping to the missing required field
+		if queryStr, ok := queryVal.(string); ok && queryStr != "" {
+			switch toolName {
+			case "Edit":
+				// Required: file_path, old_string, new_string
+				if _, ok := input["file_path"]; !ok {
+					input["file_path"] = queryStr
+				}
+			case "Grep":
+				// Required: pattern, path
+				if _, ok := input["pattern"]; !ok {
+					input["pattern"] = queryStr
+				}
+			case "Bash":
+				// Required: command
+				if _, ok := input["command"]; !ok {
+					input["command"] = queryStr
+				}
+			case "ReadFile":
+				// Required: file_path
+				if _, ok := input["file_path"]; !ok {
+					input["file_path"] = queryStr
+				}
+			case "WriteFile":
+				// Required: file_path, content
+				if _, ok := input["file_path"]; !ok {
+					input["file_path"] = queryStr
+				}
+			case "Glob":
+				// Required: pattern
+				if _, ok := input["pattern"]; !ok {
+					input["pattern"] = queryStr
+				}
+			}
+		}
+	}
+
+	return input
 }
