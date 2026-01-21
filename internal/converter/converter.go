@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/pkg/models"
 )
 
 // 默认模型映射（当环境变量未设置时使用）
@@ -393,6 +393,7 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 	// Handle reasoning_details (convert to thinking blocks)
 	// This must come BEFORE other content blocks
 	if len(choice.Message.ReasoningDetails) > 0 {
+		emptySignature := "" // 用于创建空字符串指针
 		for _, reasoningDetail := range choice.Message.ReasoningDetails {
 			if detailMap, ok := reasoningDetail.(map[string]interface{}); ok {
 				thinkingText := extractReasoningText(detailMap)
@@ -400,7 +401,7 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 					contentBlocks = append(contentBlocks, models.ContentBlock{
 						Type:      "thinking",
 						Thinking:  thinkingText,
-						Signature: "", // Required for Claude Code to hide/show thinking
+						Signature: &emptySignature, // Required for Claude Code to hide/show thinking
 					})
 				}
 			}
@@ -427,10 +428,11 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 					case "thinking":
 						// Native Claude thinking block
 						if thinking, ok := blockMap["thinking"].(string); ok {
+							emptySignature := "" // 用于创建空字符串指针
 							contentBlocks = append(contentBlocks, models.ContentBlock{
 								Type:      "thinking",
 								Thinking:  thinking,
-								Signature: "", // Required for Claude Code
+								Signature: &emptySignature, // Required for Claude Code
 							})
 						}
 					case "text":
@@ -611,8 +613,8 @@ func SanitizeToolArgs(toolName string, input map[string]interface{}) map[string]
 			input["filePath"] = queryContent
 		}
 
-	// Task/Todo tools: use content or prompt
-	case strings.Contains(toolNameLower, "task") || strings.Contains(toolNameLower, "todo"):
+	// Task tool: use prompt (但不处理TodoWrite，因为它需要todos数组)
+	case strings.Contains(toolNameLower, "task") && !strings.Contains(toolNameLower, "todo"):
 		if _, ok := input["prompt"]; !ok {
 			input["prompt"] = queryContent
 		}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/pkg/models"
 )
 
 // TestThinkingBlockSignature verifies that thinking blocks include signature field

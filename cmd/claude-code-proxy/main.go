@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/internal/daemon"
-	"github.com/claude-code-proxy/proxy/internal/server"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/internal/daemon"
+	"claude-code-proxy/internal/server"
 )
 
 func main() {

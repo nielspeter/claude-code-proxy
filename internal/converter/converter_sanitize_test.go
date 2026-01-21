@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/pkg/models"
 )
 
 func TestConvertResponse_Sanitization(t *testing.T) {

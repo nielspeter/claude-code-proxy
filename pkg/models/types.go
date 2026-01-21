@@ -11,7 +11,7 @@ type ContentBlock struct {
 	Type      string      `json:"type"`
 	Text      string      `json:"text,omitempty"`
 	Thinking  string      `json:"thinking,omitempty"`  // For thinking blocks
-	Signature string      `json:"signature,omitempty"` // Required for thinking blocks to be hidden
+	Signature *string     `json:"signature,omitempty"` // Required for thinking blocks to be hidden (pointer to include empty string)
 	ID        string      `json:"id,omitempty"`
 	Name      string      `json:"name,omitempty"`
 	Input     interface{} `json:"input,omitempty"`

@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
+	"claude-code-proxy/internal/config"
 )
 
 // TestServerSetup tests that the server can be initialized

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/pkg/models"
 )
 
 // TestProviderSpecificRequestConversion tests that requests are converted correctly per provider

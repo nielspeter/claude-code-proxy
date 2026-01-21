@@ -1,4 +1,4 @@
-module github.com/claude-code-proxy/proxy
+module claude-code-proxy
 
 go 1.24.0
 

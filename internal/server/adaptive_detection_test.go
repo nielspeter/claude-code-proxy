@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
+	"claude-code-proxy/internal/config"
 )
 
 // TestMaxTokensParameterErrorDetection tests the error detection logic for parameter errors

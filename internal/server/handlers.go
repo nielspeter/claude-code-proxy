@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/internal/converter"
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/internal/converter"
+	"claude-code-proxy/pkg/models"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -434,8 +434,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					"type":  "content_block_start",
 					"index": thinkingBlockIndex,
 					"content_block": map[string]interface{}{
-						"type":     "thinking",
-						"thinking": "", // 必需，防止思考块验证失败
+						"type":      "thinking",
+						"thinking":  "", // 必需，防止思考块验证失败
+						"signature": "", // 必需，让 Claude Code 正确隐藏/显示思考块
 					},
 				})
 				thinkingBlockStarted = true
@@ -487,8 +488,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 									"type":  "content_block_start",
 									"index": thinkingBlockIndex,
 									"content_block": map[string]interface{}{
-										"type":     "thinking",
-										"thinking": "",
+										"type":      "thinking",
+										"thinking":  "",
+										"signature": "", // 必需，让 Claude Code 正确隐藏/显示思考块
 									},
 								})
 								thinkingBlockStarted = true
@@ -523,8 +525,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 					"type":  "content_block_start",
 					"index": thinkingBlockIndex,
 					"content_block": map[string]interface{}{
-						"type":     "thinking",
-						"thinking": "",
+						"type":      "thinking",
+						"thinking":  "",
+						"signature": "", // 必需，让 Claude Code 正确隐藏/显示思考块
 					},
 				})
 				thinkingBlockStarted = true
@@ -667,8 +670,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 						}
 
 						// 处理函数参数
-						// 仅在此处累积参数 - 在流结束时发送完整的 JSON
-						if args, ok := functionData["arguments"].(string); ok && toolCall.Started {
+						// 始终累积参数，不管Started状态 - 在流结束时发送完整的 JSON
+						// 修复：移除 toolCall.Started 条件，避免在ID/Name到达前丢失参数
+						if args, ok := functionData["arguments"].(string); ok {
 							if args != "" {
 								toolCall.ArgsBuffer += args
 							}

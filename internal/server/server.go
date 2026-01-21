@@ -13,9 +13,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/internal/converter"
-	"github.com/claude-code-proxy/proxy/internal/daemon"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/internal/converter"
+	"claude-code-proxy/internal/daemon"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"

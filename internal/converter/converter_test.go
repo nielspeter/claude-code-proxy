@@ -3,8 +3,8 @@ package converter
 import (
 	"testing"
 
-	"github.com/claude-code-proxy/proxy/internal/config"
-	"github.com/claude-code-proxy/proxy/pkg/models"
+	"claude-code-proxy/internal/config"
+	"claude-code-proxy/pkg/models"
 )
 
 // TestExtractSystemText tests system message extraction from various formats
