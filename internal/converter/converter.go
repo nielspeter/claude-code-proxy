@@ -233,6 +233,7 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 		case []interface{}:
 			// Handle complex content blocks
 			var textParts []string
+			var thinkingParts []string
 			var toolCalls []models.OpenAIToolCall
 			var hasToolResult bool
 
@@ -256,6 +257,16 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 						// Extract text content
 						if text, ok := blockMap["text"].(string); ok {
 							textParts = append(textParts, text)
+						}
+
+					case "thinking":
+						// Carry Anthropic thinking blocks back upstream as
+						// reasoning_content on the assistant message. Required
+						// by Moonshot AI / Kimi when thinking is enabled —
+						// without this the provider rejects multi-turn tool
+						// calls with "reasoning_content is missing".
+						if text, ok := blockMap["thinking"].(string); ok {
+							thinkingParts = append(thinkingParts, text)
 						}
 
 					case "tool_use":
@@ -317,9 +328,10 @@ func convertMessages(claudeMessages []models.ClaudeMessage, system string) []mod
 				if !hasToolResult {
 					textContent := strings.Join(textParts, "\n")
 					openaiMessages = append(openaiMessages, models.OpenAIMessage{
-						Role:      msg.Role,
-						Content:   textContent,
-						ToolCalls: toolCalls,
+						Role:             msg.Role,
+						Content:          textContent,
+						ToolCalls:        toolCalls,
+						ReasoningContent: strings.Join(thinkingParts, "\n"),
 					})
 				}
 			}
