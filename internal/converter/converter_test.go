@@ -429,8 +429,59 @@ func TestConvertResponse(t *testing.T) {
 			t.Errorf("Tool name = %q, want %q", claudeResp.Content[0].Name, "get_weather")
 		}
 
+		// Anthropic spec requires tool_use.input to be an object, not a JSON-encoded string.
+		inputMap, ok := claudeResp.Content[0].Input.(map[string]interface{})
+		if !ok {
+			t.Fatalf("Input should be map[string]interface{}, got %T: %v",
+				claudeResp.Content[0].Input, claudeResp.Content[0].Input)
+		}
+		if loc, _ := inputMap["location"].(string); loc != "San Francisco" {
+			t.Errorf("Input.location = %q, want %q", loc, "San Francisco")
+		}
+
 		if *claudeResp.StopReason != "tool_use" {
 			t.Errorf("StopReason = %q, want %q", *claudeResp.StopReason, "tool_use")
+		}
+	})
+
+	t.Run("tool call with empty arguments returns empty object", func(t *testing.T) {
+		finishReason := "tool_calls"
+		openaiResp := &models.OpenAIResponse{
+			ID: "chatcmpl-789",
+			Choices: []models.OpenAIChoice{
+				{
+					Index: 0,
+					Message: models.OpenAIMessage{
+						Role: "assistant",
+						ToolCalls: []models.OpenAIToolCall{
+							{
+								ID:   "call_empty",
+								Type: "function",
+								Function: struct {
+									Name      string `json:"name"`
+									Arguments string `json:"arguments"`
+								}{
+									Name:      "no_args",
+									Arguments: "",
+								},
+							},
+						},
+					},
+					FinishReason: &finishReason,
+				},
+			},
+		}
+		claudeResp, err := ConvertResponse(openaiResp, "claude-sonnet-4-6")
+		if err != nil {
+			t.Fatalf("ConvertResponse() error = %v", err)
+		}
+		inputMap, ok := claudeResp.Content[0].Input.(map[string]interface{})
+		if !ok {
+			t.Fatalf("Input should be map[string]interface{} even when empty, got %T",
+				claudeResp.Content[0].Input)
+		}
+		if len(inputMap) != 0 {
+			t.Errorf("Input should be empty object, got %v", inputMap)
 		}
 	})
 }
