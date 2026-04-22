@@ -391,12 +391,22 @@ func ConvertResponse(openaiResp *models.OpenAIResponse, requestedModel string) (
 	}
 
 	// Handle tool calls (convert to tool_use blocks)
+	// OpenAI returns Function.Arguments as a JSON-encoded string; Anthropic's
+	// tool_use.input must be an object. Parse into interface{} so it serializes
+	// as an object (or {} when missing/unparseable) per Anthropic spec.
 	for _, toolCall := range choice.Message.ToolCalls {
+		var input interface{} = map[string]interface{}{}
+		if args := strings.TrimSpace(toolCall.Function.Arguments); args != "" {
+			var parsed interface{}
+			if err := json.Unmarshal([]byte(args), &parsed); err == nil {
+				input = parsed
+			}
+		}
 		contentBlocks = append(contentBlocks, models.ContentBlock{
 			Type:  "tool_use",
 			ID:    toolCall.ID,
 			Name:  toolCall.Function.Name,
-			Input: toolCall.Function.Arguments, // OpenAI sends as JSON string
+			Input: input,
 		})
 	}
 
