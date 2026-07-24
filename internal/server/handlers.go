@@ -278,7 +278,35 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 	thinkingBlockIndex := 0 // Thinking block is always index 0
 	thinkingBlockStarted := false
 	thinkingBlockHasContent := false
-	textBlockStarted := false // Track if we've sent text block_start
+	thinkingBlockClosed := false // Track if thinking block was closed (with signature)
+	textBlockStarted := false    // Track if we've sent text block_start
+
+	// closeThinkingBlock finalizes an open thinking block by emitting a
+	// signature_delta followed by content_block_stop. Claude Code discards
+	// thinking blocks that arrive without a signature, so reasoning models
+	// (LM Studio / OpenAI reasoning_content) would otherwise yield an empty
+	// response. The signature value is opaque for local/OpenAI-compatible
+	// providers (never validated against Anthropic), so a constant is safe.
+	// Idempotent: safe to call before every text/tool block and at stream end.
+	closeThinkingBlock := func() {
+		if !thinkingBlockStarted || !thinkingBlockHasContent || thinkingBlockClosed {
+			return
+		}
+		writeSSEEvent(w, "content_block_delta", map[string]interface{}{
+			"type":  "content_block_delta",
+			"index": thinkingBlockIndex,
+			"delta": map[string]interface{}{
+				"type":      "signature_delta",
+				"signature": "Y2MtcHJveHktbG9jYWwtcmVhc29uaW5n",
+			},
+		})
+		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
+			"type":  "content_block_stop",
+			"index": thinkingBlockIndex,
+		})
+		thinkingBlockClosed = true
+		_ = w.Flush()
+	}
 
 	// Send initial SSE events
 	writeSSEEvent(w, "message_start", map[string]interface{}{
@@ -412,8 +440,8 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 				"type":  "content_block_delta",
 				"index": thinkingBlockIndex,
 				"delta": map[string]interface{}{
-					"type": "thinking_delta",
-					"text": reasoningContent,
+					"type":     "thinking_delta",
+					"thinking": reasoningContent,
 				},
 			})
 		}
@@ -505,6 +533,8 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 		// Handle text delta
 		if content, ok := delta["content"].(string); ok && content != "" {
+			// Finalize any open thinking block (with signature) before text
+			closeThinkingBlock()
 			// Send content_block_start for text block on first text delta
 			if !textBlockStarted {
 				writeSSEEvent(w, "content_block_start", map[string]interface{}{
@@ -532,6 +562,8 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 
 		// Handle tool call deltas
 		if toolCallsRaw, ok := delta["tool_calls"]; ok {
+			// Finalize any open thinking block (with signature) before tool_use
+			closeThinkingBlock()
 			// Debug: Log raw tool_calls from provider
 			if cfg.Debug {
 				toolCallsJSON, _ := json.Marshal(toolCallsRaw)
@@ -671,14 +703,9 @@ func streamOpenAIToClaude(w *bufio.Writer, reader io.Reader, providerModel strin
 		}
 	}
 
-	// Send content_block_stop for thinking block if it had content
-	if thinkingBlockStarted && thinkingBlockHasContent {
-		writeSSEEvent(w, "content_block_stop", map[string]interface{}{
-			"type":  "content_block_stop",
-			"index": thinkingBlockIndex,
-		})
-		_ = w.Flush()
-	}
+	// Finalize thinking block if still open (e.g. reasoning-only response with
+	// no text/tool content). Emits signature_delta + content_block_stop.
+	closeThinkingBlock()
 
 	// Debug: Check if usage data was received
 	if cfg.Debug {
