@@ -77,6 +77,13 @@ type Config struct {
 	// OpenRouter-specific (optional, improves rate limits)
 	OpenRouterAppName string
 	OpenRouterAppURL  string
+
+	// OpenRouter provider routing - pins requests to specific upstream provider(s)
+	// so OpenRouter uses your BYOK key and fails hard instead of falling back to a
+	// credit-billed provider (e.g. Bedrock/Vertex). Set via OPENROUTER_PROVIDER_ONLY
+	// (comma-separated provider slugs, e.g. "google-ai-studio"). When set, the proxy
+	// injects {"provider": {"only": [...], "allow_fallback": false}} into the request body.
+	OpenRouterProviderOnly []string
 }
 
 // Load reads configuration from environment variables
@@ -120,6 +127,9 @@ func Load() (*Config, error) {
 		// OpenRouter-specific (optional)
 		OpenRouterAppName: os.Getenv("OPENROUTER_APP_NAME"),
 		OpenRouterAppURL:  os.Getenv("OPENROUTER_APP_URL"),
+
+		// OpenRouter provider pinning (optional). Comma-separated provider slugs.
+		OpenRouterProviderOnly: parseProviderOnly(os.Getenv("OPENROUTER_PROVIDER_ONLY")),
 	}
 
 	// Validate required fields
@@ -158,6 +168,26 @@ func getEnvAsBoolOrDefault(key string, defaultValue bool) bool {
 		return value == "true" || value == "1" || value == "yes"
 	}
 	return defaultValue
+}
+
+// parseProviderOnly splits a comma-separated list of OpenRouter provider slugs
+// (e.g. "google-ai-studio") into a clean slice, trimming whitespace and dropping
+// empties. Returns nil when unset, so the proxy skips provider injection entirely.
+func parseProviderOnly(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if slug := strings.TrimSpace(p); slug != "" {
+			result = append(result, slug)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // DetectProvider identifies the provider type based on base URL

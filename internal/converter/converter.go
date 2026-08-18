@@ -137,6 +137,19 @@ func ConvertRequest(claudeReq models.ClaudeRequest, cfg *config.Config) (*models
 		}
 	}
 
+	// Pin provider when configured: forces OpenRouter to use the user's BYOK key for
+	// the named provider(s) and fail hard instead of falling back to a credit-billed
+	// upstream (e.g. Bedrock/Vertex). Also keeps routing stable so upstream prefix
+	// caches stay warm. Applies to both streaming and non-streaming requests.
+	if cfg.DetectProvider() == config.ProviderOpenRouter && len(cfg.OpenRouterProviderOnly) > 0 {
+		// "only" pins routing to the named provider(s) and fails hard if none can
+		// serve the request, rather than falling back to a credit-billed upstream.
+		// (OpenRouter rejects an "allow_fallback" key here; "only" already prevents fallback.)
+		openaiReq.Provider = map[string]interface{}{
+			"only": cfg.OpenRouterProviderOnly,
+		}
+	}
+
 	// Set token limit using adaptive per-model detection
 	if claudeReq.MaxTokens > 0 {
 		// Use capability-based detection - NO hardcoded model patterns!
