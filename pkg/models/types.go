@@ -71,7 +71,8 @@ type OpenAIRequest struct {
 	Reasoning           map[string]interface{} `json:"reasoning,omitempty"`        // OpenRouter reasoning tokens
 	ReasoningEffort     string                 `json:"reasoning_effort,omitempty"` // OpenAI Chat Completions reasoning (GPT-5 models)
 	Tools               []OpenAITool           `json:"tools,omitempty"`
-	ToolChoice          interface{}            `json:"tool_choice,omitempty"` // Force tool usage: "auto", "required", or specific tool
+	ToolChoice          interface{}            `json:"tool_choice,omitempty"`    // Force tool usage: "auto", "required", or specific tool
+	Provider            map[string]interface{} `json:"provider,omitempty"`       // OpenRouter provider routing (e.g. {"only": ["google-ai-studio"], "allow_fallback": false})
 }
 
 // OpenAITool represents a tool in OpenAI format
